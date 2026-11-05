@@ -4,7 +4,7 @@ export const nfsVendorBankModule = {
   id: "nfs-vendor-bank",
   Chat: NfsChatbot,
   menu: {
-    title: "Non-FS Control Testing – Vendor Bank-Detail Change (P2P)",
+    title: "Non-FS Control Testing – Vendor Bank-Detail Change",
     tagline: "Builds the RCM from your SOP and walkthrough, then tests design and operating effectiveness from the evidence",
     badge: "Non-FS · Procure-to-Pay",
     accent: "#0D8390",
