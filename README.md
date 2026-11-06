@@ -55,23 +55,40 @@ same shape: `{ host, system, date, state, param, value }`. Never call SAP direct
 
 ---
 
-# Module 2 – ITGC 1.1.3 Change Management (demo)
+# Module 2 – ITGC Change Management (demo)
 
 Opens from the module menu. Deloitte theme (black / Deloitte green #86BC25, Open Sans) is applied app-wide.
 
-## Flow
-1. **Population** – choose **Pull from ACTT** (IPE passed on reliance on the system-generated ACTT population) or
-   **Upload manually** (full IPE: 3 completeness, 4 accuracy, 4 screenshot checks).
-2. **Samples** – upload a Selected Samples file or let the tool select randomly.
-3. **Evidence** – upload ticket history PDFs and GPO / LPO approval emails (.msg); the agent tests every sample
-   against attributes 1–3 with a live checklist.
-4. **Results** – verdict, per-sample results, exceptions, and **Download Testing Work Paper**.
+## Flow (Tester view)
+1. **RCM** – upload the Risk & Control Matrix; the tool shows a detailed Control Summary (ID, objective, risk, description, nature, frequency, key, owner, systems, test approach, test attributes).
+2. **Population** – **Pull from ACTT** (IPE passed on reliance on the ACTT population) or **Upload manually** (full IPE: 11 checks).
+3. **Samples** – upload a Selected Samples file or random selection.
+4. **Evidence** – ticket history PDFs and approval emails; every sample is tested against attributes A1–A4.
+5. **Results** – verdict, per-sample results, attribute summary, exceptions, improvement opportunities, annotated evidence preview,
+   an exception summary with one bullet per sample, and **Review**.
 
-This is a scripted demo: any uploaded file gives the same result.
+## Review and control owner
+- **Review** – the reviewer approves, or rejects with an observation.
+- **Control owner view** (tab at the top) – the owner accepts or rejects the observation, adds notes and reference documents.
+  - Accepted → the tester view shows it and testing is performed again (round 2), keeping the full chat history.
+  - Rejected → no re-test; the tester view shows the reason and documents, and the reviewer can review again.
+
+## Work paper (own format)
+Summary (incl. one-line exception summary per sample) · RCM & Attributes (incl. attribute summary) · Population & IPE ·
+Sample Testing · Evidence (annotated screenshots per sample) · Exceptions · Improvement Opportunities · Review Log.
+
+This is a scripted demo: any uploaded file gives the same result. Round 2 tests the sample that was missing evidence in round 1.
 
 ## Where things live
 | Path | What |
 |---|---|
+| `src/modules/itgc-change/data/demo.js` | All demo values – RCM, attributes, population, IPE, samples (round 1 and 2), improvements |
+| `src/modules/itgc-change/ChangeChatbot.jsx` | Conversation flow, review and owner workflow |
+| `src/modules/itgc-change/components.jsx` | Choice cards, KPI strip, banners, review form, owner panel, view toggle |
+| `src/modules/itgc-change/evidenceImages.js` | Annotated evidence screenshots (canvas) |
+| `src/modules/itgc-change/exportWorkpaper.js` | Work paper (Excel) |
+
+---|---|
 | `src/modules/itgc-change/data/demo.js` | All demo values – control text, population, IPE checks, samples and results. Edit here. |
 | `src/modules/itgc-change/ChangeChatbot.jsx` | Conversation flow |
 | `src/modules/itgc-change/exportWorkpaper.js` | Work paper in the Change Template format: **Test Sheet** + **Evidence & Attribute mapping** |

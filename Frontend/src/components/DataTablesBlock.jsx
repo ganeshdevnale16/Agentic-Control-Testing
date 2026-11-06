@@ -26,6 +26,11 @@ const BADGE_COLORS = {
   pending: { bg: "#ffedd5", fg: "#9a3412" },
   "not tested": { bg: "#ffedd5", fg: "#9a3412" },
   "to test": { bg: "#E3F1CC", fg: "#26890D" },
+  "no exception": { bg: "#dcfce7", fg: "#166534" },
+  "not fully tested": { bg: "#ffedd5", fg: "#9a3412" },
+  high: { bg: "#fee2e2", fg: "#991b1b" },
+  medium: { bg: "#ffedd5", fg: "#9a3412" },
+  low: { bg: "#dcfce7", fg: "#166534" },
   "manual test": { bg: "#E3F1CC", fg: "#26890D" },
 };
 

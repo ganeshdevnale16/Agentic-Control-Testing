@@ -1,29 +1,65 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, FileSpreadsheet, ListChecks, RotateCcw, Shuffle, ShieldCheck, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ClipboardCheck, Download, Image as ImageIcon, RefreshCw, RotateCcw, Shuffle, ShieldCheck, Upload, UserCheck } from "lucide-react";
 import MessageList from "../../components/MessageList";
 import InputArea from "../../components/InputArea";
 import StepBadge from "../../components/StepBadge";
 import DataTablesBlock from "../../components/DataTablesBlock";
-import { ChoiceCards, KpiStrip, SOURCE_OPTIONS, StatusBanner } from "./components";
+import { ChoiceCards, KpiStrip, OwnerPanel, ReviewForm, SOURCE_OPTIONS, StatusBanner, SummaryBullets, ViewToggle } from "./components";
 import {
-  ACTT_IPE_STATEMENT, ACTT_SYSTEM, CONTROL, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, SAMPLES, VERDICT,
-  exceptions, passed, testingPerformed,
+  ACTT_IPE_STATEMENT, ACTT_SYSTEM, ATTRIBUTES, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM,
+  attributeSummary, getSamples, sampleSummary, stats, testingPerformed,
 } from "./data/demo";
+import { evidenceImagesFor } from "./evidenceImages";
 
 const downloadWP = async (opts) => (await import("./exportWorkpaper")).downloadChangeWorkpaper(opts);
 
-const TOTAL = 4;
+const TOTAL = 5;
 const FILE_GROUP_THRESHOLD = 8;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const today = () => new Date().toLocaleDateString("en-GB").replace(/\//g, ".");
 
 const PLACEHOLDERS = {
-  source: "Choose where I should get the population from…",
+  rcm: "Attach your RCM (Risk & Control Matrix)…",
+  source: "Choose where I should get the population from, or attach it…",
   "manual-file": "Attach the population file (E070 / STMS extracts) and screenshots…",
   running: "Working on it…",
   samples: "Attach the selected samples file, or choose random selection…",
   evidence: "Attach the ticket history PDFs and approval emails (.msg)…",
   done: "Ask about an exception or a sample, e.g. “CIDK905003”…",
 };
+
+// ── tables ──────────────────────────────────────────────────────────────────
+const rcmTable = () => ({
+  title: "Control Summary",
+  columns: [
+    { key: "f", label: "Field", minWidth: 150 },
+    { key: "d", label: "Detail", minWidth: 480 },
+  ],
+  rows: [
+    { f: "Control ID", d: RCM.controlId },
+    { f: "Control objective", d: RCM.objective },
+    { f: "Risk", d: RCM.risk },
+    { f: "Control description", d: RCM.description },
+    { f: "Type / nature", d: RCM.nature },
+    { f: "Frequency", d: RCM.frequency },
+    { f: "Key?", d: RCM.key },
+    { f: "Owner", d: RCM.owner },
+    { f: "Systems", d: RCM.systems },
+    { f: "Test approach", d: RCM.testApproach },
+    {
+      f: "Test attributes",
+      d: (
+        <div>
+          {ATTRIBUTES.map((a, i) => (
+            <div key={a.short} style={{ marginBottom: 4 }}>
+              {i + 1}. <strong>{a.short}</strong> – {a.text}
+            </div>
+          ))}
+        </div>
+      ),
+    },
+  ],
+});
 
 const ipeTable = (rows) => ({
   title: "IPE validation",
@@ -36,24 +72,22 @@ const ipeTable = (rows) => ({
   rows,
 });
 
-const populationTables = () => [
-  {
-    title: "Row match proof (sample)",
-    note: "E070 column A ↔ STMS column D, exact TR number match. CR numbers taken from E070 column J (10 digits starting with 6 or 7).",
-    columns: [
-      { key: "tr", label: "TR number", mono: true },
-      { key: "cr", label: "CR number", mono: true },
-      { key: "e070", label: "E070 row" },
-      { key: "stms", label: "STMS row" },
-      { key: "owner", label: "Owner" },
-      { key: "user", label: "Import user" },
-      { key: "date", label: "Date" },
-    ],
-    rows: POPULATION.matchProof,
-  },
-];
+const matchTable = () => ({
+  title: "Row match proof (sample)",
+  note: "E070 column A ↔ STMS column D, exact TR number match. CR numbers taken from E070 column J (10 digits starting with 6 or 7).",
+  columns: [
+    { key: "tr", label: "TR number", mono: true },
+    { key: "cr", label: "CR number", mono: true },
+    { key: "e070", label: "E070 row" },
+    { key: "stms", label: "STMS row" },
+    { key: "owner", label: "Owner" },
+    { key: "user", label: "Import user" },
+    { key: "date", label: "Date" },
+  ],
+  rows: POPULATION.matchProof,
+});
 
-const sampleTable = (withResult) => ({
+const sampleTable = (samples, withResult) => ({
   title: withResult ? "Per-sample results" : "Selected samples",
   columns: [
     { key: "n", label: "#" },
@@ -62,43 +96,74 @@ const sampleTable = (withResult) => ({
     { key: "type", label: "Change type" },
     ...(withResult
       ? [
-          { key: "a1", label: "Attr 1" },
-          { key: "a2", label: "Attr 2" },
-          { key: "a3", label: "Attr 3" },
+          ...ATTRIBUTES.map((_, k) => ({ key: `a${k}`, label: `A${k + 1}`, align: "center" })),
           { key: "result", label: "Result", type: "badge" },
-          { key: "note", label: "Notes", minWidth: 240 },
+          { key: "note", label: "Notes", minWidth: 220 },
         ]
       : []),
   ],
-  rows: SAMPLES.map((s, i) => ({
+  rows: samples.map((s, i) => ({
     n: i + 1,
     tr: s.tr,
     cr: s.cr,
     type: withResult ? s.type : s.result === "Missing" ? "To be confirmed from ticket" : s.type,
-    a1: s.attrs[0],
-    a2: s.attrs[1],
-    a3: s.attrs[2],
-    result: s.result === "Pass" ? "Pass" : "Fail",
+    ...Object.fromEntries(s.attrs.map((a, k) => [`a${k}`, a])),
+    result: s.result === "Pass" ? "Pass" : s.result === "Missing" ? "Not tested" : "Fail",
     note: s.note || "—",
   })),
 });
 
-const exceptionTable = () => ({
+const attributeTable = (samples) => ({
+  title: "Attribute summary",
+  columns: [
+    { key: "n", label: "#" },
+    { key: "attribute", label: "Attribute", minWidth: 180 },
+    { key: "tested", label: "Tested", align: "center" },
+    { key: "ok", label: "√", align: "center" },
+    { key: "x", label: "X", align: "center" },
+    { key: "conclusion", label: "Conclusion", type: "badge" },
+    { key: "comment", label: "Comment", minWidth: 220 },
+  ],
+  rows: attributeSummary(samples),
+});
+
+const exceptionTable = (samples) => ({
   title: "Exceptions",
   columns: [
     { key: "tr", label: "TR number", mono: true },
     { key: "cr", label: "CR number", mono: true },
     { key: "note", label: "Exception", minWidth: 360 },
   ],
-  rows: SAMPLES.filter((s) => s.result !== "Pass"),
+  rows: samples.filter((s) => s.result !== "Pass"),
 });
 
-// ── agent step lists for the live checklist ───────────────────────────────
+const improvementTable = () => ({
+  title: "Improvement opportunities",
+  note: "Control design and operation improvements identified during testing – also in the work paper.",
+  columns: [
+    { key: "ref", label: "Ref" },
+    { key: "area", label: "Area" },
+    { key: "priority", label: "Priority", type: "badge" },
+    { key: "recommendation", label: "Recommendation", minWidth: 420 },
+  ],
+  rows: IMPROVEMENTS,
+});
+
+// ── agent step lists ──────────────────────────────────────────────────────
 const ok = (text, log) => ({ text, status: "pass", log: log ? [log] : undefined });
+
+const RCM_STEPS = [
+  {
+    id: "r1",
+    label: "Read the RCM",
+    detail: RCM.controlId,
+    subChecks: [ok("Control objective, risk and description identified"), ok(`Nature, frequency and owner captured – ${RCM.frequency}`), ok(`${ATTRIBUTES.length} test attributes extracted`), ok("Evidence required mapped to each attribute")],
+  },
+];
 
 const ACTT_STEPS = [
   { id: "a1", label: "Connect to ACTT", detail: `Read-only connection to ${ACTT_SYSTEM.sid} · client ${ACTT_SYSTEM.client}`, subChecks: [ok("Authenticated to ACTT", "[ACTT] Session opened (read-only)"), ok(`Located ${ACTT_SYSTEM.description} ${ACTT_SYSTEM.sid} · client ${ACTT_SYSTEM.client}`)] },
-  { id: "a2", label: "Extract transport population", detail: `In-scope period ${CONTROL.period}`, subChecks: [ok("E070 transport headers extracted – 87 rows"), ok("STMS_IMPORT import history extracted – 87 rows"), ok("Merged on TR number – 87 / 87 matched"), ok("CR numbers extracted – 70 unique CRs")] },
+  { id: "a2", label: "Extract transport population", detail: `In-scope period ${RCM.period}`, subChecks: [ok("E070 transport headers extracted – 87 rows"), ok("STMS_IMPORT import history extracted – 87 rows"), ok("Merged on TR number – 87 / 87 matched"), ok("CR numbers extracted – 70 unique CRs")] },
   { id: "a3", label: "IPE – reliance on ACTT", detail: "System-generated population", subChecks: IPE_ACTT.map((c) => ok(`${c.check} – ${c.value}`)) },
 ];
 
@@ -112,30 +177,33 @@ const MANUAL_STEPS = [
   })),
 ];
 
-const testingSteps = (fileCount) => [
+const testingSteps = (samples, fileCount, round) => [
   {
     id: "t0",
     label: "Match evidence to samples",
-    detail: `${fileCount} file(s) received`,
+    detail: `${fileCount} file(s) received${round > 1 ? ` · round ${round}` : ""}`,
     subChecks: [
       ok("Ticket history PDFs indexed by CR number"),
-      ok("GPO / LPO approval emails matched to 4 standard changes"),
-      { text: "No ticket history PDF found for CIDK905611 (CR 6000028397)", status: "exception" },
+      ok(`GPO / LPO approval emails matched to ${samples.filter((s) => s.type === "Standard change").length} standard changes`),
+      samples.some((s) => s.result === "Missing")
+        ? { text: "No ticket history PDF found for CIDK905611 (CR 6000028397)", status: "exception" }
+        : ok("Ticket history found for every sample, including CIDK905611 (supplied by the control owner)"),
     ],
   },
-  ...SAMPLES.map((s, i) => {
+  ...samples.map((s, i) => {
     const miss = s.result === "Missing";
     return {
       id: `t${i + 1}`,
       label: `Sample ${i + 1} – ${s.tr} → CR ${s.cr}`,
       detail: miss ? "Not tested" : s.type,
       subChecks: miss
-        ? [{ text: "Attributes 1–3 not tested – source document missing", status: "exception" }]
+        ? [{ text: "Attributes 1–4 not tested – source document missing", status: "exception" }]
         : [
-            ok(`Attributes 1 & 2 – unit test ${s.unitDate}, UAT ${s.uatDate}, evidence retained in Solman`),
-            s.attrs[2] === "X"
-              ? { text: `Attribute 3 – SOD violation: owner ${s.owner} also imported the transport`, status: "exception" }
-              : ok(`Attribute 3 – ${s.type === "Preapproved change" ? "on pre-approved list" : "approved before import"}; owner ≠ import user`),
+            ok(`A1–A2 – unit test ${s.unitDate}, UAT ${s.uatDate}, evidence retained in Solman`),
+            ok(`A3 – ${s.type === "Preapproved change" ? "on pre-approved list" : `approved ${s.apprDate}`}, before import ${s.importDate}`),
+            s.attrs[3] === "X"
+              ? { text: `A4 – SOD violation: owner ${s.owner} also imported the transport`, status: "exception" }
+              : ok(`A4 – owner ${s.owner} ≠ import user ${s.user}`),
           ],
     };
   }),
@@ -145,23 +213,17 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const idRef = useRef(10);
   const nid = () => idRef.current++;
   const handlers = useRef({});
-  const ctx = useRef({ source: null, sampleMethod: "" });
-  const stageRef = useRef("source");
-  const [stage, setStageState] = useState("source");
+  const ctx = useRef({ source: null, sampleMethod: "", round: 1, reviews: [], sourceMsg: null });
+  const stageRef = useRef("rcm");
+  const [stage, setStageState] = useState("rcm");
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [stagedFiles, setStagedFiles] = useState([]);
+  const [view, setView] = useState("tester");
+  const [reviews, setReviewsState] = useState([]);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
-
-  const sourceContent = (chosen) => (
-    <>
-      <StepBadge index={1} total={TOTAL} label="Population" />
-      <div>Let's start with the population. Pull it from ACTT, or upload the population file (E070 / STMS extracts) – you can also just attach it below.</div>
-      <ChoiceCards options={SOURCE_OPTIONS} chosen={chosen} onChoose={(id) => handlers.current.chooseSource(id)} />
-    </>
-  );
 
   const [messages, setMessages] = useState(() => [
     {
@@ -170,21 +232,14 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       type: "jsx",
       content: (
         <>
-          Hello! I'm <strong>ITGC Compliance Audit</strong>, your IT General Controls Testing & SOX Compliance assistant.
+          Hello! I'm your <strong>Agentic control testing assistant</strong>.
           <br />
           <br />
-          Automate ITGC audits for SOX compliance. Pull the SAP transport population from ACTT or upload it yourself, then run change management control
-          tests (ITGC 1.1.3), segregation of duties checks and pre-approved change verification, and generate the Testing Work Paper.
-          <br />
-          <br />
-          You can attach files using the paperclip button in the input bar, or drag & drop files into the input area.
-          <br />
-          <br />
-          What would you like to work on today?
+          <StepBadge index={1} total={TOTAL} label="RCM" />
+          <div>Please upload your RCM (Risk &amp; Control Matrix) file to proceed. Excel or any other format works.</div>
         </>
       ),
     },
-    { id: 2, role: "assistant", type: "jsx", content: sourceContent(null) },
   ]);
 
   useEffect(() => {
@@ -194,6 +249,10 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const setStage = (s) => {
     stageRef.current = s;
     setStageState(s);
+  };
+  const setReviews = (fn) => {
+    ctx.current.reviews = fn(ctx.current.reviews);
+    setReviewsState(ctx.current.reviews);
   };
   const say = async (msg, delay = 450) => {
     const id = nid();
@@ -205,47 +264,73 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const sayText = (content, delay) => say({ type: "jsx", content }, delay);
   const update = (id, patch) => setMessages((p) => p.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   const userText = (content) => setMessages((p) => [...p, { id: nid(), role: "user", type: "text", content }]);
+  const samples = () => getSamples(ctx.current.round);
+  const wpData = () => ({ source: ctx.current.source, sampleMethod: ctx.current.sampleMethod, round: ctx.current.round, samples: samples(), reviews: ctx.current.reviews });
 
-  // ── Step 1: population ──────────────────────────────────────────────────
-  const chooseSource = async (src) => {
+  // ── Step 1: RCM ─────────────────────────────────────────────────────────
+  const readRcm = async () => {
+    setStage("running");
+    setBusy(true);
+    await say({ type: "checks", intro: <div>Reading your RCM…</div>, checks: RCM_STEPS, runningLabel: "Reading the RCM…", doneLabel: "RCM read.", onComplete: () => handlers.current.afterRcm() }, 300);
+  };
+
+  handlers.current.afterRcm = async () => {
+    setBusy(false);
+    await say(
+      {
+        type: "jsx",
+        content: (
+          <>
+            Thanks – I've read your RCM. I test the <strong>{RCM.name}</strong> control ({RCM.controlId}) the way an auditor would – checking that each change is tested
+            before implementation, testing is documented and retained, changes are approved before migration and developers don't import their own transports – and
+            rolling each finding up to a pass / exception verdict.
+            <div style={{ marginTop: 14 }}>
+              <DataTablesBlock tables={[rcmTable()]} />
+            </div>
+          </>
+        ),
+      },
+      400
+    );
+    setStage("source");
+    ctx.current.sourceMsg = await say({ type: "jsx", content: sourceContent(null) });
+  };
+
+  const sourceContent = (chosen) => (
+    <>
+      <StepBadge index={2} total={TOTAL} label="Population" />
+      <div>
+        Let's get started – please provide the population of transports imported into production in {RCM.period}. Pull it from ACTT, or upload the E070 / STMS
+        extracts with screenshots, and I'll test completeness and accuracy end to end.
+      </div>
+      <ChoiceCards options={SOURCE_OPTIONS} chosen={chosen} onChoose={(id) => handlers.current.chooseSource(id)} />
+    </>
+  );
+
+  // ── Step 2: population ──────────────────────────────────────────────────
+  handlers.current.chooseSource = async (src) => {
     if (stageRef.current !== "source") return;
     ctx.current.source = src;
-    update(2, { content: sourceContent(src) });
+    update(ctx.current.sourceMsg, { content: sourceContent(src) });
     if (src === "actt") {
       userText(`Pull the population from ACTT (${ACTT_SYSTEM.sid} · client ${ACTT_SYSTEM.client})`);
-      onTitle(`ACTT ${ACTT_SYSTEM.sid} ${ACTT_SYSTEM.client}`);
-      return runPopulation(ACTT_STEPS, `Connecting to ACTT now – nothing more is needed from you.`);
+      return runPopulation(ACTT_STEPS, "Connecting to ACTT now – nothing more is needed from you.");
     }
     userText("I'll upload the population manually");
     setStage("manual-file");
-    await sayText(
-      <>
-        <StepBadge index={1} total={TOTAL} label="Upload population" />
-        <div>
-          Please upload the 1.1.3 population file with the <strong>E070</strong> and <strong>STMS_IMPORT</strong> extracts, plus the E070 and STMS screenshots. I'll run the full IPE validation on it.
-        </div>
-      </>
-    );
+    await sayText("Please upload the population file with the E070 and STMS_IMPORT extracts, plus the E070 and STMS screenshots. I'll run the full IPE validation on it.");
   };
-  handlers.current.chooseSource = chooseSource;
 
   const runPopulation = async (steps, intro) => {
     setStage("running");
     setBusy(true);
     await say(
-      {
-        type: "checks",
-        intro: <div>{intro}</div>,
-        checks: steps,
-        runningLabel: "Extracting and validating the population…",
-        doneLabel: "Population ready – IPE validation passed.",
-        onComplete: afterPopulation,
-      },
+      { type: "checks", intro: <div>{intro}</div>, checks: steps, runningLabel: "Extracting and validating the population…", doneLabel: "Population ready – IPE validation passed.", onComplete: () => handlers.current.afterPopulation() },
       350
     );
   };
 
-  const afterPopulation = useCallback(async () => {
+  handlers.current.afterPopulation = async () => {
     const actt = ctx.current.source === "actt";
     setBusy(false);
     await say(
@@ -266,10 +351,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
                 { label: "SOD flags (owner = user)", value: POPULATION.sodFlags },
               ]}
             />
-            <div style={{ fontSize: 13, color: "#53565A", marginBottom: 10 }}>
-              Period {POPULATION.period} · transport target {POPULATION.target} · TR prefix {POPULATION.prefix}
-            </div>
-            <DataTablesBlock tables={[ipeTable(actt ? IPE_ACTT : IPE_MANUAL), ...populationTables()]} />
+            <DataTablesBlock tables={[ipeTable(actt ? IPE_ACTT : IPE_MANUAL), matchTable()]} />
           </>
         ),
       },
@@ -281,22 +363,21 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       type: "jsx",
       content: (
         <>
-          <StepBadge index={2} total={TOTAL} label="Samples" />
+          <StepBadge index={3} total={TOTAL} label="Samples" />
           <div>
-            Population processed: {POPULATION.transports} transports for {POPULATION.period}. Upload your <strong>Selected Samples</strong> file, or I can randomly select samples from the population
-            (recommended: {SAMPLES.length} for this population size).
+            Population processed: {POPULATION.transports} transports. Upload your <strong>Selected Samples</strong> file, or I can randomly select {samples().length} samples per
+            the RCM test approach.
           </div>
         </>
       ),
       actions: [
         { id: "upload-samples", label: "Upload selected samples", primary: true, icon: Upload },
-        { id: "random", label: `Randomly select ${SAMPLES.length} samples`, icon: Shuffle },
+        { id: "random", label: `Randomly select ${samples().length} samples`, icon: Shuffle },
       ],
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
 
-  // ── Step 2: samples ─────────────────────────────────────────────────────
+  // ── Step 3: samples ─────────────────────────────────────────────────────
   const takeSamples = async (method) => {
     if (stageRef.current !== "samples") return;
     update(ctx.current.samplesMsg, { used: true });
@@ -306,103 +387,217 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       type: "jsx",
       content: (
         <>
-          <DataTablesBlock intro={<>Samples locked – {SAMPLES.length} transports matched precisely to the population:</>} tables={[sampleTable(false)]} />
-          <StepBadge index={3} total={TOTAL} label="Evidence" />
+          <DataTablesBlock intro={<>Samples locked – {samples().length} transports matched to the population:</>} tables={[sampleTable(samples(), false)]} />
+          <StepBadge index={4} total={TOTAL} label="Evidence" />
           <div>
-            Please upload the <strong>ticket history PDFs</strong> for these samples. For standard changes, also upload the <strong>GPO / LPO approval emails</strong> (.msg). You can attach a whole folder.
+            Please upload the <strong>ticket history PDFs</strong> for these samples and, for standard changes, the <strong>GPO / LPO approval emails</strong> (.msg). You can
+            attach a whole folder.
           </div>
         </>
       ),
     });
   };
 
-  // ── Step 3: testing ─────────────────────────────────────────────────────
+  // ── Step 4: testing ─────────────────────────────────────────────────────
   const runTesting = async (fileCount) => {
     setStage("running");
     setBusy(true);
+    const round = ctx.current.round;
     await say(
       {
         type: "checks",
-        intro: <div>Thanks – testing each sample against the three control attributes.</div>,
-        checks: testingSteps(fileCount),
+        intro: <div>{round > 1 ? `Re-performing testing – round ${round}.` : "Thanks – testing each sample against the control attributes."}</div>,
+        checks: testingSteps(samples(), fileCount, round),
         runningLabel: "Inspecting tickets, approvals and segregation of duties…",
-        doneLabel: `Testing complete – ${exceptions} exception(s) noted.`,
-        onComplete: finish,
+        doneLabel: `Testing complete – ${stats(samples()).exceptions} exception(s) noted.`,
+        onComplete: () => handlers.current.finish(),
       },
       400
     );
   };
 
-  const resultsContent = () => (
-    <>
-      <StepBadge index={4} total={TOTAL} label="Results & work paper" />
-      <div style={{ fontWeight: 600 }}>{CONTROL.ref} audit result</div>
-      <StatusBanner tone={exceptions ? "bad" : "ok"} title={`Overall verdict: ${VERDICT}`}>
-        {SAMPLES.length} samples tested · {exceptions} exception(s). Population IPE:{" "}
-        {ctx.current.source === "actt" ? "passed using the ACTT population" : "passed, 11 / 11 checks"}.
-      </StatusBanner>
-      <KpiStrip
-        items={[
-          { label: "Samples tested", value: SAMPLES.length },
-          { label: "Passed", value: passed, tone: "ok" },
-          { label: "Exceptions", value: exceptions, tone: exceptions ? "bad" : "ok" },
-          { label: "Population", value: POPULATION.transports },
-        ]}
-      />
-      <div style={{ fontSize: 13, background: "#FFF6E0", borderLeft: "4px solid #ED8B00", padding: "8px 12px", marginBottom: 12 }}>
-        1 sample incomplete – ticket history PDF not provided for CIDK905611.
-      </div>
-      <DataTablesBlock tables={[sampleTable(true), exceptionTable()]} />
-    </>
-  );
-
-  const finish = useCallback(async () => {
+  handlers.current.finish = async () => {
+    const list = samples();
+    const st = stats(list);
+    const round = ctx.current.round;
     setBusy(false);
     setStage("done");
     await say(
       {
         type: "jsx",
-        content: resultsContent(),
+        content: (
+          <>
+            <StepBadge index={5} total={TOTAL} label={round > 1 ? `Results – round ${round}` : "Results & work paper"} />
+            <div style={{ fontWeight: 600 }}>
+              {RCM.controlId} final report{round > 1 ? ` – round ${round}` : ""}
+            </div>
+            <StatusBanner tone={st.exceptions ? "bad" : "ok"} title={`Overall verdict: ${st.verdict}`}>
+              {list.length} samples tested · {st.exceptions} exception(s). Population IPE: {ctx.current.source === "actt" ? "passed using the ACTT population" : "passed, 11 / 11 checks"}.
+            </StatusBanner>
+            <KpiStrip
+              items={[
+                { label: "Samples tested", value: list.length },
+                { label: "Passed", value: st.passed, tone: "ok" },
+                { label: "Exceptions", value: st.exceptions, tone: st.exceptions ? "bad" : "ok" },
+                { label: "Population", value: POPULATION.transports },
+              ]}
+            />
+            <DataTablesBlock tables={[sampleTable(list, true), attributeTable(list), exceptionTable(list), improvementTable()]} />
+          </>
+        ),
         actions: [
           { id: "download", label: "Download Testing Work Paper", primary: true, icon: Download },
+          { id: "evidence", label: "Preview annotated evidence", icon: ImageIcon },
           { id: "ipe", label: "Show IPE checks", icon: ShieldCheck },
-          { id: "new", label: "Start a new audit", icon: RotateCcw },
         ],
       },
       500
     );
     await sleep(250);
-    await sayText("Every step is logged in the activity log above. Ask me about any sample (e.g. “CIDK905003”) or the exceptions.");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    await say({
+      type: "jsx",
+      content: (
+        <>
+          <div style={{ fontWeight: 600 }}>Exception summary – all {list.length} samples</div>
+          <SummaryBullets items={list.map(sampleSummary)} />
+          <div style={{ marginTop: 12 }}>The results are ready for review. Send them to the reviewer to approve or reject.</div>
+        </>
+      ),
+      actions: [
+        { id: "review", label: "Review", primary: true, icon: ClipboardCheck },
+        { id: "new", label: "Start a new audit", icon: RotateCcw },
+      ],
+    });
+  };
 
-  const download = async () => {
-    await downloadWP({ source: ctx.current.source, sampleMethod: ctx.current.sampleMethod });
+  // ── Step 5: review / owner ──────────────────────────────────────────────
+  const openReview = async (fromMsg) => {
+    if (fromMsg) update(fromMsg, { used: true });
+    await say({ type: "jsx", content: <ReviewForm round={ctx.current.round} onSubmit={(r) => handlers.current.submitReview(r)} /> }, 250);
+  };
+
+  handlers.current.submitReview = async ({ decision, comment, reviewer }) => {
+    const entry = { round: ctx.current.round, decision, comment, reviewer, date: today() };
+    setReviews((p) => [...p, entry]);
+    if (decision === "Approved") {
+      await sayText(
+        <>
+          <StatusBanner tone="ok" title={`Approved by ${reviewer}`}>
+            Testing for round {ctx.current.round} is signed off{comment ? ` – “${comment}”` : ""}. The review is recorded in the work paper's Review Log.
+          </StatusBanner>
+        </>
+      );
+      return say({ type: "jsx", content: <div>Download the final, reviewed work paper.</div>, actions: [{ id: "download", label: "Download Testing Work Paper", primary: true, icon: Download }] }, 200);
+    }
+    setStage("owner-pending");
+    await say({
+      type: "jsx",
+      content: (
+        <>
+          <StatusBanner tone="bad" title={`Rejected by ${reviewer} – observation sent to the control owner`}>“{comment}”</StatusBanner>
+          <div>The control owner can accept or reject this observation in the Control owner view.</div>
+        </>
+      ),
+      actions: [{ id: "owner", label: "Open control owner view", primary: true, icon: UserCheck }],
+    });
+  };
+
+  const respond = async (idx, { decision, notes, docs }) => {
+    const owner = { decision, notes, docs, date: today() };
+    setReviews((p) => p.map((r, i) => (i === idx ? { ...r, owner } : r)));
+    setView("tester");
+    const docLine = docs.length ? <div style={{ fontSize: 13, color: "#53565A", marginTop: 4 }}>Reference documents: {docs.join(", ")}</div> : null;
+    if (decision === "Accepted") {
+      await sayText(
+        <>
+          <StatusBanner tone="ok" title="Control owner accepted the observation – testing will be performed again">
+            {notes || "No notes added."}
+            {docLine}
+          </StatusBanner>
+        </>
+      );
+      ctx.current.round += 1;
+      setStage("evidence");
+      return say({
+        type: "jsx",
+        content: (
+          <>
+            <StepBadge index={4} total={TOTAL} label={`Evidence – round ${ctx.current.round}`} />
+            <div>
+              Please upload the updated evidence for the samples (ticket history PDFs and approval emails)
+              {docs.length ? ", or I can re-test straight away with the documents the control owner provided" : ""}.
+            </div>
+          </>
+        ),
+        actions: docs.length ? [{ id: "retest-owner", label: "Re-test with the owner's documents", primary: true, icon: RefreshCw }] : [],
+      });
+    }
+    await sayText(
+      <>
+        <StatusBanner tone="bad" title="Control owner rejected the observation – no re-test">
+          <strong>Reason:</strong> {notes}
+          {docLine}
+        </StatusBanner>
+      </>
+    );
+    setStage("done");
+    return say({
+      type: "jsx",
+      content: <div>Reviewer: the owner's response is recorded. You can review again or download the work paper with the response in the Review Log.</div>,
+      actions: [
+        { id: "review", label: "Review again", primary: true, icon: ClipboardCheck },
+        { id: "download", label: "Download Testing Work Paper", icon: Download },
+      ],
+    });
+  };
+
+  const showEvidence = async () => {
+    const list = samples().filter((s) => s.result !== "Missing");
+    const picks = [list.find((s) => s.result === "Fail"), list.find((s) => s.result === "Pass")].filter(Boolean);
+    const imgs = picks.flatMap((s) => evidenceImagesFor(s).map((im) => ({ ...im, tr: s.tr })));
+    await sayText(
+      <>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Annotated evidence (preview)</div>
+        <div style={{ fontSize: 13, color: "#53565A", marginBottom: 10 }}>Green boxes show an attribute met, red shows an exception. Every tested sample has these screenshots in the work paper's Evidence tab.</div>
+        {imgs.map((im) => (
+          <figure key={im.title} style={{ margin: "0 0 14px" }}>
+            <img src={im.dataUrl} alt={`${im.title} – ${im.caption}`} style={{ width: "100%", maxWidth: 820, border: "1px solid #D0D0CE", borderRadius: 4 }} />
+            <figcaption style={{ fontSize: 12.5, color: "#53565A", marginTop: 4 }}>
+              {im.title} – {im.caption}
+            </figcaption>
+          </figure>
+        ))}
+      </>,
+      300
+    );
   };
 
   // ── Q&A after testing ───────────────────────────────────────────────────
   const qa = async (text) => {
     const l = text.toLowerCase();
-    const tr = SAMPLES.find((s) => l.includes(s.tr.toLowerCase()) || l.includes(s.cr));
-    if (tr) {
+    const s = samples().find((x) => l.includes(x.tr.toLowerCase()) || l.includes(x.cr));
+    if (s) {
       return sayText(
         <>
           <strong>
-            {tr.tr} → CR {tr.cr}
+            {s.tr} → CR {s.cr}
           </strong>{" "}
-          ({tr.type}): <strong style={{ color: tr.result === "Pass" ? "#26890D" : "#DA291C" }}>{tr.result === "Pass" ? "Pass" : "Fail"}</strong>
-          <div style={{ fontSize: 13, color: "#53565A", marginTop: 4 }}>{testingPerformed(tr)}</div>
+          ({s.type}): <strong style={{ color: s.result === "Pass" ? "#26890D" : "#DA291C" }}>{s.result === "Pass" ? "Pass" : s.result === "Missing" ? "Not tested" : "Fail"}</strong>
+          <div style={{ fontSize: 13, color: "#53565A", marginTop: 4 }}>{testingPerformed(s)}</div>
         </>
       );
     }
     if (/download|work ?paper|excel|twp/.test(l)) {
-      await download();
-      return sayText("Downloading the Testing Work Paper (Test Sheet + Evidence & Attribute mapping).", 250);
+      await downloadWP(wpData());
+      return sayText("Downloading the Testing Work Paper.", 250);
     }
+    if (/review/.test(l)) return openReview();
+    if (/evidence|screenshot|annot/.test(l)) return showEvidence();
+    if (/improve|recommend/.test(l)) return say({ type: "tables", tables: [improvementTable()] });
+    if (/attribute/.test(l)) return say({ type: "tables", tables: [attributeTable(samples())] });
     if (/ipe|population|complete|accura/.test(l)) return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
-    if (/new|restart|start over/.test(l)) return onNewChat();
-    if (/exception|fail|sod|issue|why/.test(l)) return say({ type: "tables", intro: `${exceptions} exception(s) noted:`, tables: [exceptionTable()] });
-    return sayText("I can explain the exceptions, show a sample (type its TR or CR number), show the IPE checks, or download the work paper.");
+    if (/exception|fail|sod|issue|why|summary/.test(l)) return say({ type: "jsx", content: <SummaryBullets items={samples().map(sampleSummary)} /> });
+    return sayText("I can explain the exceptions, show a sample (type its TR or CR number), the attribute summary, improvement opportunities or annotated evidence, start the review, or download the work paper.");
   };
 
   // ── buttons ─────────────────────────────────────────────────────────────
@@ -410,13 +605,20 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     if (action === "upload-samples") return fileInputRef.current?.click();
     if (action === "random") {
       if (stageRef.current !== "samples") return;
-      userText(`Randomly select ${SAMPLES.length} samples`);
-      return takeSamples(`Random selection by the tool – ${SAMPLES.length} samples from a population of ${POPULATION.transports} transports.`);
+      userText(`Randomly select ${samples().length} samples`);
+      return takeSamples(`Random selection by the tool – ${samples().length} samples from a population of ${POPULATION.transports} transports.`);
     }
-    if (action === "download") return download();
-    if (action === "ipe") {
-      userText("Show IPE checks");
-      return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
+    if (action === "download") return downloadWP(wpData());
+    if (action === "evidence") return showEvidence();
+    if (action === "ipe") return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
+    if (action === "review") return openReview(msgId);
+    if (action === "owner") return setView("owner");
+    if (action === "retest-owner") {
+      if (stageRef.current !== "evidence") return;
+      update(msgId, { used: true });
+      const last = ctx.current.reviews[ctx.current.reviews.length - 1];
+      userText("Re-test with the control owner's documents");
+      return runTesting(last?.owner?.docs?.length || 1);
     }
     if (action === "new") return onNewChat();
   };
@@ -444,26 +646,29 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     setMessages((p) => [...p, ...userMsgs]);
     const st = stageRef.current;
 
+    if (st === "rcm") {
+      if (files.length) {
+        onTitle(files[0].name);
+        return readRcm();
+      }
+      return sayText("Please attach your RCM file to continue – Excel or any other format works.");
+    }
     if (st === "source") {
       if (files.length) {
         ctx.current.source = "manual";
-        update(2, { content: sourceContent("manual") });
-        onTitle(files[0].name);
+        update(ctx.current.sourceMsg, { content: sourceContent("manual") });
         return runPopulation(MANUAL_STEPS, "Thanks – reading the population and running the IPE validation.");
       }
-      if (/actt|pull|system/i.test(text)) return chooseSource("actt");
-      if (/manual|upload/i.test(text)) return chooseSource("manual");
+      if (/actt|pull|system/i.test(text)) return handlers.current.chooseSource("actt");
+      if (/manual|upload/i.test(text)) return handlers.current.chooseSource("manual");
       return sayText("Please choose a population source above – pull from ACTT, or upload manually.");
     }
     if (st === "manual-file") {
-      if (files.length) {
-        onTitle(files[0].name);
-        return runPopulation(MANUAL_STEPS, "Thanks – reading the population and running the IPE validation.");
-      }
+      if (files.length) return runPopulation(MANUAL_STEPS, "Thanks – reading the population and running the IPE validation.");
       return sayText("Please attach the population file (E070 and STMS extracts) to continue.");
     }
     if (st === "samples") {
-      if (files.length) return takeSamples(`Selected samples file provided by the engagement team (${files[0].name}) – ${SAMPLES.length} samples.`);
+      if (files.length) return takeSamples(`Selected samples file provided by the engagement team (${files[0].name}) – ${samples().length} samples.`);
       if (/random|select/i.test(text)) return onAction(null, "random");
       return sayText("Upload the Selected Samples file, or choose random selection.");
     }
@@ -471,28 +676,35 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       if (files.length) return runTesting(files.length);
       return sayText("Please attach the ticket history PDFs and approval emails for the selected samples.");
     }
+    if (st === "owner-pending") return sayText("Waiting for the control owner to respond to the reviewer's observation – switch to the Control owner view.");
     if (st === "done" && text) return qa(text);
     if (text) return sayText("I'm working on it – one moment.", 200);
   };
 
+  const pending = reviews.filter((r) => r.decision === "Rejected" && !r.owner).length;
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", backgroundColor: "#ffffff", minWidth: 0, height: "100%" }}>
-      <MessageList ref={endRef} messages={messages} config={{}} onAction={onAction} />
-      <InputArea
-        input={input}
-        setInput={setInput}
-        stagedFiles={stagedFiles}
-        onFileChange={handleFileChange}
-        onFolderChange={handleFileChange}
-        onRemoveStagedFile={(i) => setStagedFiles((p) => p.filter((_, k) => k !== i))}
-        onClearStagedFiles={() => setStagedFiles([])}
-        onSend={handleSend}
-        processing={busy}
-        fileInputRef={fileInputRef}
-        folderInputRef={folderInputRef}
-        placeholder={PLACEHOLDERS[stage]}
-        footnote="Demo environment · results are fixed for every upload · AI-assisted results should be reviewed by a qualified tester"
-      />
+      <ViewToggle view={view} setView={setView} pending={pending} />
+      <div style={{ flex: 1, minHeight: 0, display: view === "tester" ? "flex" : "none", flexDirection: "column" }}>
+        <MessageList ref={endRef} messages={messages} config={{}} onAction={onAction} />
+        <InputArea
+          input={input}
+          setInput={setInput}
+          stagedFiles={stagedFiles}
+          onFileChange={handleFileChange}
+          onFolderChange={handleFileChange}
+          onRemoveStagedFile={(i) => setStagedFiles((p) => p.filter((_, k) => k !== i))}
+          onClearStagedFiles={() => setStagedFiles([])}
+          onSend={handleSend}
+          processing={busy}
+          fileInputRef={fileInputRef}
+          folderInputRef={folderInputRef}
+          placeholder={PLACEHOLDERS[stage] || PLACEHOLDERS.done}
+          footnote="Demo environment · results are fixed for every upload · AI-assisted results should be reviewed by a qualified tester"
+        />
+      </div>
+      {view === "owner" && <OwnerPanel reviews={reviews} onRespond={respond} controlName={`${RCM.controlId} · ${RCM.name}`} />}
     </div>
   );
 }
