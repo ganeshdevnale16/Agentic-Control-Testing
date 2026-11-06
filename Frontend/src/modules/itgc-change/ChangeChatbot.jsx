@@ -158,7 +158,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const sourceContent = (chosen) => (
     <>
       <StepBadge index={1} total={TOTAL} label="Population" />
-      <div>Where should I get the transport population from?</div>
+      <div>Let's start with the population. Pull it from ACTT, or upload the population file (E070 / STMS extracts) – you can also just attach it below.</div>
       <ChoiceCards options={SOURCE_OPTIONS} chosen={chosen} onChoose={(id) => handlers.current.chooseSource(id)} />
     </>
   );
@@ -170,31 +170,17 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       type: "jsx",
       content: (
         <>
-          Hello! I'm your <strong>ITGC change management testing assistant</strong>.
+          Hello! I'm <strong>ITGC Compliance Audit</strong>, your IT General Controls Testing & SOX Compliance assistant.
           <br />
           <br />
-          I test {CONTROL.ref} the way an auditor would: I get the transport population, validate it (IPE), take your samples, inspect the ticket history and
-          approvals for each one, and write up the Testing Work Paper.
-          <div style={{ marginTop: 14 }}>
-            <DataTablesBlock
-              tables={[
-                {
-                  title: "Control summary",
-                  columns: [
-                    { key: "f", label: "Field", minWidth: 150 },
-                    { key: "d", label: "Detail", minWidth: 420 },
-                  ],
-                  rows: [
-                    { f: "Control", d: `${CONTROL.ref} · ${CONTROL.name}` },
-                    { f: "Description", d: CONTROL.description },
-                    { f: "In-scope period", d: CONTROL.period },
-                    { f: "Environment", d: CONTROL.environment },
-                    ...CONTROL.attributes.map((a, i) => ({ f: `Attribute ${i + 1}`, d: a })),
-                  ],
-                },
-              ]}
-            />
-          </div>
+          Automate ITGC audits for SOX compliance. Pull the SAP transport population from ACTT or upload it yourself, then run change management control
+          tests (ITGC 1.1.3), segregation of duties checks and pre-approved change verification, and generate the Testing Work Paper.
+          <br />
+          <br />
+          You can attach files using the paperclip button in the input bar, or drag & drop files into the input area.
+          <br />
+          <br />
+          What would you like to work on today?
         </>
       ),
     },
