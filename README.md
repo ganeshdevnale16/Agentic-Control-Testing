@@ -67,15 +67,26 @@ Opens from the module menu. Deloitte theme (black / Deloitte green #86BC25, Open
 5. **Results** – verdict, per-sample results, attribute summary, exceptions, improvement opportunities, annotated evidence preview,
    an exception summary with one bullet per sample, and **Review**.
 
-## Review and control owner
-- **Review** – the reviewer approves, or rejects with an observation.
-- **Control owner view** (tab at the top) – the owner accepts or rejects the observation, adds notes and reference documents.
-  - Accepted → the tester view shows it and testing is performed again (round 2), keeping the full chat history.
-  - Rejected → no re-test; the tester view shows the reason and documents, and the reviewer can review again.
+## Reviewer and control owner workflow
+Three tabs at the top of the module: **Tester view**, **Reviewer view**, **Control owner view** (red badges show what is waiting).
+
+1. **Tester** finishes testing and clicks **Send to reviewer**.
+2. **Reviewer view** – shows the verdict, KPIs and the exception summary (one bullet per sample). The reviewer **approves**, or **rejects**.
+   A rejection needs (a) the **phase where the issue is** – RCM, Population & IPE, Samples, or Evidence & testing – and (b) an observation.
+3. **Control owner is notified** in both cases (badge on the owner tab + message in the tester chat).
+   - Approved → notification card, owner acknowledges. Work paper can be downloaded as final.
+   - Rejected → owner **accepts** or **rejects** the observation, adds notes and reference documents.
+4. **Owner accepts** → the tester chat shows it and testing restarts **from the phase the reviewer flagged** (not from evidence), keeping the full chat history:
+   - RCM → upload RCM again → population → samples → evidence → testing
+   - Population & IPE → choose / upload population again → samples → evidence → testing
+   - Samples → select samples again → evidence → testing
+   - Evidence & testing → upload evidence (or re-test with the owner's documents) → testing
+5. **Owner rejects** → no re-test. The reason and documents are shown to the reviewer in the Reviewer view (review history) and the results come back to the reviewer to review again.
 
 ## Work paper (own format)
 Summary (incl. one-line exception summary per sample) · RCM & Attributes (incl. attribute summary) · Population & IPE ·
-Sample Testing · Evidence (annotated screenshots per sample) · Exceptions · Improvement Opportunities · Review Log.
+Sample Testing · Evidence (annotated screenshots per sample) · Exceptions · Improvement Opportunities · Review Log
+(reviewer decision, **phase flagged**, observation, owner response, notes, reference documents).
 
 This is a scripted demo: any uploaded file gives the same result. Round 2 tests the sample that was missing evidence in round 1.
 
@@ -83,17 +94,10 @@ This is a scripted demo: any uploaded file gives the same result. Round 2 tests 
 | Path | What |
 |---|---|
 | `src/modules/itgc-change/data/demo.js` | All demo values – RCM, attributes, population, IPE, samples (round 1 and 2), improvements |
-| `src/modules/itgc-change/ChangeChatbot.jsx` | Conversation flow, review and owner workflow |
-| `src/modules/itgc-change/components.jsx` | Choice cards, KPI strip, banners, review form, owner panel, view toggle |
+| `src/modules/itgc-change/ChangeChatbot.jsx` | Conversation flow, send-to-reviewer, review decision, owner response, restart-from-phase |
+| `src/modules/itgc-change/components.jsx` | Choice cards, KPI strip, banners, Reviewer panel, Owner panel, view tabs, `PHASES` |
 | `src/modules/itgc-change/evidenceImages.js` | Annotated evidence screenshots (canvas) |
 | `src/modules/itgc-change/exportWorkpaper.js` | Work paper (Excel) |
-
----|---|
-| `src/modules/itgc-change/data/demo.js` | All demo values – control text, population, IPE checks, samples and results. Edit here. |
-| `src/modules/itgc-change/ChangeChatbot.jsx` | Conversation flow |
-| `src/modules/itgc-change/exportWorkpaper.js` | Work paper in the Change Template format: **Test Sheet** + **Evidence & Attribute mapping** |
-| `src/modules/itgc-change/components.jsx` | Source choice cards, KPI strip, status banner |
-
 
 ---
 

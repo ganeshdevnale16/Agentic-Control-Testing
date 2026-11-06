@@ -1,5 +1,5 @@
 import { useState as useLocalState } from "react";
-import { Check, CheckCircle2, ClipboardCheck, Cloud, FileSpreadsheet, Paperclip, ThumbsDown, ThumbsUp, UserCheck, X as XIcon } from "lucide-react";
+import { Bell, Check, ClipboardCheck, Cloud, Eye, FileSpreadsheet, Paperclip, ThumbsDown, ThumbsUp, UserCheck, X as XIcon } from "lucide-react";
 
 const DG = "#86BC25";
 const DGD = "#26890D";
@@ -153,109 +153,221 @@ function PrimaryButton({ disabled, onClick, children }) {
   );
 }
 
-// Reviewer decision form shown inside the chat
-export function ReviewForm({ round, onSubmit }) {
-  const [decision, setDecision] = useLocalState(null);
-  const [comment, setComment] = useLocalState("");
-  const [reviewer, setReviewer] = useLocalState("");
-  const [done, setDone] = useLocalState(false);
-  const needsComment = decision === "Rejected";
-  const canSubmit = decision && (!needsComment || comment.trim()) && !done;
+// Phases of the test flow. When the reviewer rejects, they name the phase where
+// the issue is, and re-testing restarts from that phase (not from evidence).
+export const PHASES = [
+  { id: "rcm", label: "RCM", hint: "Control details or attributes are wrong – the RCM has to be uploaded again." },
+  { id: "population", label: "Population & IPE", hint: "Population source or IPE is not adequate – the population is obtained again." },
+  { id: "samples", label: "Samples", hint: "Sample selection is not acceptable – samples are selected again." },
+  { id: "evidence", label: "Evidence & testing", hint: "Evidence is missing or testing is wrong – evidence is provided and samples re-tested." },
+];
+export const phaseLabel = (id) => PHASES.find((p) => p.id === id)?.label || "–";
 
+const pill = (bg, color, text) => (
+  <span style={{ fontSize: 11.5, fontWeight: 700, borderRadius: 99, padding: "2px 9px", background: bg, color, whiteSpace: "nowrap" }}>{text}</span>
+);
+
+function PageShell({ title, subtitle, children }) {
   return (
-    <div style={{ border: "1px solid #D0D0CE", borderTop: `3px solid ${DG}`, borderRadius: 4, padding: 16, marginTop: 10, background: "#fff" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, marginBottom: 4 }}>
-        <ClipboardCheck size={16} /> Reviewer sign-off – round {round}
+    <div style={{ flex: 1, overflowY: "auto", background: "#F7F7F7" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "24px 24px 48px" }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
+        <div style={{ fontSize: 13, color: "#53565A", marginBottom: 18 }}>{subtitle}</div>
+        {children}
       </div>
-      <div style={{ fontSize: 12.5, color: "#53565A", marginBottom: 12 }}>Review the results and work paper, then approve them or reject with an observation for the control owner.</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <ToggleButton active={decision === "Approved"} onClick={() => setDecision("Approved")} Icon={ThumbsUp} disabled={done}>
-          Approve
-        </ToggleButton>
-        <ToggleButton active={decision === "Rejected"} tone="bad" onClick={() => setDecision("Rejected")} Icon={ThumbsDown} disabled={done}>
-          Reject
-        </ToggleButton>
-      </div>
-      <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>Reviewer name</label>
-      <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} disabled={done} placeholder="e.g. Senior Manager" style={{ ...fieldStyle, marginBottom: 10 }} />
-      <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>
-        {needsComment ? "Observation for the control owner (required)" : "Comment (optional)"}
-      </label>
-      <textarea
-        rows={3}
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        disabled={done}
-        placeholder={needsComment ? "e.g. CIDK905611 was not tested – obtain the ticket history and re-perform testing." : "Add a comment…"}
-        style={{ ...fieldStyle, marginBottom: 12 }}
-      />
-      {done ? (
-        <div style={{ fontSize: 13, color: DGD, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-          <CheckCircle2 size={15} /> Submitted
-        </div>
-      ) : (
-        <PrimaryButton
-          disabled={!canSubmit}
-          onClick={() => {
-            setDone(true);
-            onSubmit({ decision, comment: comment.trim(), reviewer: reviewer.trim() || "Reviewer" });
-          }}
-        >
-          Submit review
-        </PrimaryButton>
-      )}
     </div>
   );
 }
 
-export function ViewToggle({ view, setView, pending }) {
-  const tab = (id, label, Icon) => (
-    <button
-      type="button"
-      onClick={() => setView(id)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "7px 14px",
-        border: "none",
-        borderBottom: `3px solid ${view === id ? DG : "transparent"}`,
-        background: "none",
-        fontSize: 13.5,
-        fontWeight: 600,
-        color: view === id ? "#000" : "#53565A",
-        cursor: "pointer",
-        fontFamily: "inherit",
-      }}
-    >
-      <Icon size={15} /> {label}
-      {id === "owner" && pending > 0 && (
-        <span style={{ background: "#DA291C", color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 99, padding: "1px 7px" }}>{pending}</span>
+const cardStyle = (accent) => ({ background: "#fff", border: "1px solid #E5E5E5", borderLeft: `4px solid ${accent}`, borderRadius: 4, padding: 16, marginBottom: 14 });
+
+function ReviewerDecisionForm({ onSubmit }) {
+  const [decision, setDecision] = useLocalState(null);
+  const [phase, setPhase] = useLocalState(null);
+  const [comment, setComment] = useLocalState("");
+  const [reviewer, setReviewer] = useLocalState("");
+  const rejecting = decision === "Rejected";
+  const canSubmit = decision && (!rejecting || (phase && comment.trim()));
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid #E5E5E5", paddingTop: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <ToggleButton active={decision === "Approved"} onClick={() => setDecision("Approved")} Icon={ThumbsUp}>
+          Approve
+        </ToggleButton>
+        <ToggleButton active={rejecting} tone="bad" onClick={() => setDecision("Rejected")} Icon={ThumbsDown}>
+          Reject
+        </ToggleButton>
+      </div>
+      <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>Reviewer name</label>
+      <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} placeholder="e.g. Senior Manager" style={{ ...fieldStyle, marginBottom: 10 }} />
+      {rejecting && (
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 6 }}>Where is the issue? Re-testing restarts from this phase (required)</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
+            {PHASES.map((p, i) => {
+              const on = phase === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPhase(p.id)}
+                  style={{ textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 4, padding: "10px 12px", border: `1.5px solid ${on ? "#DA291C" : "#D0D0CE"}`, background: on ? "#FDECEA" : "#fff" }}
+                >
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: on ? "#A4121D" : "#000" }}>
+                    {i + 1}. {p.label}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#53565A", marginTop: 2, lineHeight: 1.45 }}>{p.hint}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
-    </button>
+      <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>{rejecting ? "Observation for the control owner (required)" : "Comment (optional)"}</label>
+      <textarea
+        rows={3}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder={rejecting ? "e.g. CIDK905611 was not tested – obtain the ticket history and re-perform testing." : "Add a comment…"}
+        style={{ ...fieldStyle, marginBottom: 12 }}
+      />
+      <PrimaryButton
+        disabled={!canSubmit}
+        onClick={() => onSubmit({ decision, comment: comment.trim(), reviewer: reviewer.trim() || "Reviewer", phase: rejecting ? phase : null })}
+      >
+        {rejecting ? "Reject and notify control owner" : "Approve and notify control owner"}
+      </PrimaryButton>
+    </div>
   );
+}
+
+function ownerStatus(r) {
+  if (r.decision === "Approved") return { text: "Approved – owner notified", bg: "#F1F8E6", color: DGD };
+  if (!r.owner) return { text: "Waiting for the control owner", bg: "#FFF1D6", color: "#9A3412" };
+  if (r.owner.decision === "Accepted") return { text: `Owner accepted – re-tested from ${phaseLabel(r.phase)}`, bg: "#F1F8E6", color: DGD };
+  return { text: "Owner rejected the observation", bg: "#FDECEA", color: "#A4121D" };
+}
+
+// Reviewer view – submissions sent by the tester, and the review history
+export function ReviewerPanel({ submission, summary, reviews, onSubmit, controlName }) {
+  const history = reviews.slice().reverse();
+  return (
+    <PageShell title="Reviewer view" subtitle={`${controlName} · testing results sent by the tester for your review`}>
+      {!submission && (
+        <div style={{ background: "#fff", border: "1px solid #E5E5E5", borderRadius: 4, padding: 24, textAlign: "center", color: "#53565A", fontSize: 14, marginBottom: 14 }}>
+          Nothing is waiting for your review. When the tester sends the results, they appear here for you to approve or reject.
+        </div>
+      )}
+      {submission && (
+        <div style={cardStyle("#ED8B00")}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 700 }}>Testing results – round {submission.round}</div>
+            {pill("#FFF1D6", "#9A3412", "Awaiting your review")}
+          </div>
+          <div style={{ fontSize: 12, color: "#53565A", margin: "2px 0 6px" }}>Sent by the tester on {submission.date}</div>
+          {submission.note && <div style={{ fontSize: 13, background: "#FFF8E8", borderRadius: 4, padding: "8px 12px", marginBottom: 6 }}>{submission.note}</div>}
+          <StatusBanner tone={summary.exceptions ? "bad" : "ok"} title={`Overall verdict: ${summary.verdict}`}>
+            {summary.total} samples tested · {summary.exceptions} exception(s)
+          </StatusBanner>
+          <KpiStrip
+            items={[
+              { label: "Samples tested", value: summary.total },
+              { label: "Passed", value: summary.passed, tone: "ok" },
+              { label: "Exceptions", value: summary.exceptions, tone: summary.exceptions ? "bad" : "ok" },
+            ]}
+          />
+          <div style={{ fontWeight: 600, fontSize: 13.5 }}>Exception summary – one point per sample</div>
+          <SummaryBullets items={summary.bullets} />
+          <div style={{ fontSize: 12.5, color: "#53565A", marginTop: 10 }}>The full work paper (annotated evidence, attribute summary, improvement opportunities) can be downloaded from the tester view.</div>
+          <ReviewerDecisionForm key={submission.id} onSubmit={onSubmit} />
+        </div>
+      )}
+      {history.length > 0 && <div style={{ fontWeight: 700, margin: "20px 0 10px" }}>Review history</div>}
+      {history.map((r, i) => {
+        const st = ownerStatus(r);
+        return (
+          <div key={i} style={cardStyle(r.decision === "Approved" ? DG : "#DA291C")}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700 }}>
+                Round {r.round} – {r.decision} by {r.reviewer}
+              </div>
+              {pill(st.bg, st.color, st.text)}
+            </div>
+            <div style={{ fontSize: 12, color: "#53565A", margin: "2px 0 8px" }}>
+              {r.date}
+              {r.phase ? ` · issue raised in: ${phaseLabel(r.phase)}` : ""}
+            </div>
+            {r.comment && <div style={{ fontSize: 14, background: "#F7F7F7", borderRadius: 4, padding: "10px 12px" }}>{r.comment}</div>}
+            {r.owner && (
+              <div style={{ marginTop: 10, fontSize: 13.5 }}>
+                <strong>Control owner response:</strong> {r.owner.decision} on {r.owner.date}
+                {r.owner.notes && <div style={{ marginTop: 4 }}>{r.owner.notes}</div>}
+                {r.owner.docs?.length > 0 && <div style={{ marginTop: 4, color: "#53565A", fontSize: 12.5 }}>Reference documents: {r.owner.docs.join(", ")}</div>}
+                {r.owner.decision === "Rejected" && <div style={{ marginTop: 6, color: "#A4121D", fontSize: 12.5 }}>No re-test was performed. Review the results again above.</div>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </PageShell>
+  );
+}
+
+export function ViewToggle({ view, setView, badges }) {
+  const tab = (id, label, Icon) => {
+    const n = badges?.[id] || 0;
+    return (
+      <button
+        type="button"
+        onClick={() => setView(id)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "7px 14px",
+          border: "none",
+          borderBottom: `3px solid ${view === id ? DG : "transparent"}`,
+          background: "none",
+          fontSize: 13.5,
+          fontWeight: 600,
+          color: view === id ? "#000" : "#53565A",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        <Icon size={15} /> {label}
+        {n > 0 && <span style={{ background: "#DA291C", color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 99, padding: "1px 7px" }}>{n}</span>}
+      </button>
+    );
+  };
   return (
     <div style={{ display: "flex", gap: 4, padding: "0 24px", borderBottom: "1px solid #E5E5E5", background: "#fff", flexShrink: 0 }}>
       {tab("tester", "Tester view", ClipboardCheck)}
+      {tab("reviewer", "Reviewer view", Eye)}
       {tab("owner", "Control owner view", UserCheck)}
     </div>
   );
 }
 
-function OwnerResponseForm({ onSubmit }) {
+function OwnerResponseForm({ phase, onSubmit }) {
   const [decision, setDecision] = useLocalState(null);
   const [notes, setNotes] = useLocalState("");
   const [docs, setDocs] = useLocalState([]);
   const canSubmit = decision && (decision === "Accepted" || notes.trim());
   return (
     <div style={{ marginTop: 12, borderTop: "1px solid #E5E5E5", paddingTop: 12 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <ToggleButton active={decision === "Accepted"} onClick={() => setDecision("Accepted")} Icon={ThumbsUp}>
           Accept observation
         </ToggleButton>
         <ToggleButton active={decision === "Rejected"} tone="bad" onClick={() => setDecision("Rejected")} Icon={ThumbsDown}>
           Reject observation
         </ToggleButton>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#53565A", marginBottom: 12 }}>
+        {decision === "Accepted" && `Testing is performed again, starting from: ${phaseLabel(phase)}.`}
+        {decision === "Rejected" && "No re-test. The reviewer sees your reason and documents and reviews again."}
+        {!decision && "Accepting restarts testing from the phase the reviewer flagged; rejecting sends your reason back to the reviewer."}
       </div>
       <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>
         {decision === "Rejected" ? "Reason for rejecting (required)" : "Notes"}
@@ -298,52 +410,69 @@ function OwnerResponseForm({ onSubmit }) {
   );
 }
 
-// Control owner view – the reviewer's observations and the owner's responses
-export function OwnerPanel({ reviews, onRespond, controlName }) {
-  const items = reviews.map((r, i) => ({ ...r, idx: i })).filter((r) => r.decision === "Rejected");
+// Control owner view – notifications from the reviewer and the owner's responses
+export function OwnerPanel({ reviews, onRespond, onAck, controlName }) {
+  const items = reviews.map((r, i) => ({ ...r, idx: i }));
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "#F7F7F7" }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "24px 24px 48px" }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Control owner view</div>
-        <div style={{ fontSize: 13, color: "#53565A", marginBottom: 18 }}>{controlName} · observations raised by the reviewer on the testing results</div>
-        {!items.length && (
-          <div style={{ background: "#fff", border: "1px solid #E5E5E5", borderRadius: 4, padding: 24, textAlign: "center", color: "#53565A", fontSize: 14 }}>
-            No observations from the reviewer yet. When the reviewer rejects the results, the observation appears here for you to accept or reject.
-          </div>
-        )}
-        {items
-          .slice()
-          .reverse()
-          .map((r) => {
-            const answered = !!r.owner;
+    <PageShell title="Control owner view" subtitle={`${controlName} · notifications and observations from the reviewer`}>
+      {!items.length && (
+        <div style={{ background: "#fff", border: "1px solid #E5E5E5", borderRadius: 4, padding: 24, textAlign: "center", color: "#53565A", fontSize: 14 }}>
+          No notifications yet. When the reviewer approves or rejects the results, you are notified here.
+        </div>
+      )}
+      {items
+        .slice()
+        .reverse()
+        .map((r) => {
+          if (r.decision === "Approved") {
             return (
-              <div key={r.idx} style={{ background: "#fff", border: "1px solid #E5E5E5", borderLeft: `4px solid ${answered ? (r.owner.decision === "Accepted" ? DG : "#DA291C") : "#ED8B00"}`, borderRadius: 4, padding: 16, marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 700 }}>Observation – testing round {r.round}</div>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, borderRadius: 99, padding: "2px 9px", background: answered ? (r.owner.decision === "Accepted" ? "#F1F8E6" : "#FDECEA") : "#FFF1D6", color: answered ? (r.owner.decision === "Accepted" ? DGD : "#A4121D") : "#9A3412" }}>
-                    {answered ? `${r.owner.decision} by owner` : "Awaiting your response"}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "#53565A", margin: "2px 0 10px" }}>
-                  Raised by {r.reviewer} on {r.date}
-                </div>
-                <div style={{ fontSize: 14, background: "#F7F7F7", borderRadius: 4, padding: "10px 12px" }}>{r.comment}</div>
-                {answered ? (
-                  <div style={{ marginTop: 12, fontSize: 13.5 }}>
-                    <div>
-                      <strong>Your response:</strong> {r.owner.decision} on {r.owner.date}
-                    </div>
-                    {r.owner.notes && <div style={{ marginTop: 4 }}>{r.owner.notes}</div>}
-                    {r.owner.docs?.length > 0 && <div style={{ marginTop: 4, color: "#53565A", fontSize: 12.5 }}>Reference: {r.owner.docs.join(", ")}</div>}
+              <div key={r.idx} style={cardStyle(DG)}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                    <Bell size={15} /> Reviewer approved the testing – round {r.round}
                   </div>
-                ) : (
-                  <OwnerResponseForm onSubmit={(resp) => onRespond(r.idx, resp)} />
+                  {r.ack ? pill("#F2F2F2", "#53565A", "Acknowledged") : pill("#F1F8E6", DGD, "New notification")}
+                </div>
+                <div style={{ fontSize: 12, color: "#53565A", margin: "2px 0 8px" }}>
+                  Approved by {r.reviewer} on {r.date} · no action needed
+                </div>
+                {r.comment && <div style={{ fontSize: 14, background: "#F7F7F7", borderRadius: 4, padding: "10px 12px" }}>{r.comment}</div>}
+                {!r.ack && (
+                  <div style={{ marginTop: 12 }}>
+                    <PrimaryButton onClick={() => onAck(r.idx)}>Acknowledge</PrimaryButton>
+                  </div>
                 )}
               </div>
             );
-          })}
-      </div>
-    </div>
+          }
+          const answered = !!r.owner;
+          const accent = answered ? (r.owner.decision === "Accepted" ? DG : "#DA291C") : "#ED8B00";
+          const st = ownerStatus(r);
+          return (
+            <div key={r.idx} style={cardStyle(accent)}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700 }}>Observation – testing round {r.round}</div>
+                {pill(st.bg, st.color, answered ? `${r.owner.decision} by owner` : "Awaiting your response")}
+              </div>
+              <div style={{ fontSize: 12, color: "#53565A", margin: "2px 0 10px" }}>
+                Raised by {r.reviewer} on {r.date} · issue in: <strong>{phaseLabel(r.phase)}</strong>
+              </div>
+              <div style={{ fontSize: 14, background: "#F7F7F7", borderRadius: 4, padding: "10px 12px" }}>{r.comment}</div>
+              {answered ? (
+                <div style={{ marginTop: 12, fontSize: 13.5 }}>
+                  <div>
+                    <strong>Your response:</strong> {r.owner.decision} on {r.owner.date}
+                  </div>
+                  {r.owner.notes && <div style={{ marginTop: 4 }}>{r.owner.notes}</div>}
+                  {r.owner.docs?.length > 0 && <div style={{ marginTop: 4, color: "#53565A", fontSize: 12.5 }}>Reference: {r.owner.docs.join(", ")}</div>}
+                </div>
+              ) : (
+                <OwnerResponseForm phase={r.phase} onSubmit={(resp) => onRespond(r.idx, resp)} />
+              )}
+            </div>
+          );
+        })}
+    </PageShell>
   );
 }
 

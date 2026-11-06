@@ -87,7 +87,7 @@ function summarySheet(wb, d) {
   r = kv(ws, r, "Environment", RCM.environment, L);
   r = kv(ws, r, "Population source", d.source === "actt" ? "Pulled from ACTT (system-generated)" : "Uploaded by the engagement team (E070 / STMS extracts)", L);
   r = kv(ws, r, "Sample selection", d.sampleMethod, L, 28);
-  r = kv(ws, r, "Testing round", d.round > 1 ? `Round ${d.round} (re-performed after control owner accepted the reviewer observation)` : "Round 1", L, d.round > 1 ? 28 : undefined);
+  r = kv(ws, r, "Testing round", d.round > 1 ? `Round ${d.round} (re-performed from ${PHASE_LABEL[[...d.reviews].reverse().find((v) => v.decision === "Rejected" && v.owner?.decision === "Accepted")?.phase] || "evidence"} after the control owner accepted the reviewer observation)` : "Round 1", L, d.round > 1 ? 28 : undefined);
   r = kv(ws, r, "Prepared by / date", `Agentic Controls Testing (AI-assisted) · ${today()}`, L);
   const last = d.reviews[d.reviews.length - 1];
   r = kv(ws, r, "Review status", last ? `${last.decision} by reviewer on ${last.date}${last.owner ? ` · owner ${last.owner.decision.toLowerCase()} the observation` : ""}` : "Not yet reviewed", L);
@@ -304,12 +304,14 @@ function improvementSheet(wb) {
 }
 
 // ── 8. Review Log ───────────────────────────────────────────────────────────
+const PHASE_LABEL = { rcm: "RCM", population: "Population & IPE", samples: "Samples", evidence: "Evidence & testing" };
+
 function reviewSheet(wb, d) {
-  const L = 8;
-  const ws = sheet(wb, "Review Log", [8, 13, 12, 44, 13, 12, 40, 30]);
+  const L = 9;
+  const ws = sheet(wb, "Review Log", [8, 13, 12, 18, 44, 13, 12, 40, 30]);
   banner(ws, "Review log", "Reviewer decisions and control owner responses", L);
   let r = 5;
-  headerRow(ws, r, ["Round", "Reviewer decision", "Date", "Reviewer observation / comment", "Owner response", "Date", "Owner notes", "Reference documents"]);
+  headerRow(ws, r, ["Round", "Reviewer decision", "Date", "Issue raised in (re-test restarts here)", "Reviewer observation / comment", "Owner response", "Date", "Owner notes", "Reference documents"]);
   r++;
   if (!d.reviews.length) {
     ws.mergeCells(r, 1, r, L);
@@ -321,6 +323,7 @@ function reviewSheet(wb, d) {
       v.round,
       v.decision,
       v.date,
+      v.phase ? PHASE_LABEL[v.phase] : "–",
       v.comment || "–",
       v.owner?.decision || (v.decision === "Rejected" ? "Pending" : "–"),
       v.owner?.date || "–",

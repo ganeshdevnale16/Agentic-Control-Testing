@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardCheck, Download, Image as ImageIcon, RefreshCw, RotateCcw, Shuffle, ShieldCheck, Upload, UserCheck } from "lucide-react";
+import { Download, Eye, Image as ImageIcon, RefreshCw, RotateCcw, Send, Shuffle, ShieldCheck, Upload, UserCheck } from "lucide-react";
 import MessageList from "../../components/MessageList";
 import InputArea from "../../components/InputArea";
 import StepBadge from "../../components/StepBadge";
 import DataTablesBlock from "../../components/DataTablesBlock";
-import { ChoiceCards, KpiStrip, OwnerPanel, ReviewForm, SOURCE_OPTIONS, StatusBanner, SummaryBullets, ViewToggle } from "./components";
+import { ChoiceCards, KpiStrip, OwnerPanel, ReviewerPanel, SOURCE_OPTIONS, StatusBanner, SummaryBullets, ViewToggle, phaseLabel } from "./components";
 import {
   ACTT_IPE_STATEMENT, ACTT_SYSTEM, ATTRIBUTES, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM,
   attributeSummary, getSamples, sampleSummary, stats, testingPerformed,
@@ -213,7 +213,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const idRef = useRef(10);
   const nid = () => idRef.current++;
   const handlers = useRef({});
-  const ctx = useRef({ source: null, sampleMethod: "", round: 1, reviews: [], sourceMsg: null });
+  const ctx = useRef({ source: null, sampleMethod: "", round: 1, reviews: [], sourceMsg: null, submission: null });
   const stageRef = useRef("rcm");
   const [stage, setStageState] = useState("rcm");
   const [busy, setBusy] = useState(false);
@@ -221,6 +221,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const [stagedFiles, setStagedFiles] = useState([]);
   const [view, setView] = useState("tester");
   const [reviews, setReviewsState] = useState([]);
+  const [submission, setSubmissionState] = useState(null);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
@@ -253,6 +254,10 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   const setReviews = (fn) => {
     ctx.current.reviews = fn(ctx.current.reviews);
     setReviewsState(ctx.current.reviews);
+  };
+  const setSub = (v) => {
+    ctx.current.submission = v;
+    setSubmissionState(v);
   };
   const say = async (msg, delay = 450) => {
     const id = nid();
@@ -359,11 +364,15 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     );
     await sleep(300);
     setStage("samples");
+    await askSamples();
+  };
+
+  const askSamples = async () => {
     ctx.current.samplesMsg = await say({
       type: "jsx",
       content: (
         <>
-          <StepBadge index={3} total={TOTAL} label="Samples" />
+          <StepBadge index={3} total={TOTAL} label={ctx.current.round > 1 ? `Samples – round ${ctx.current.round}` : "Samples"} />
           <div>
             Population processed: {POPULATION.transports} transports. Upload your <strong>Selected Samples</strong> file, or I can randomly select {samples().length} samples per
             the RCM test approach.
@@ -460,94 +469,148 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
         <>
           <div style={{ fontWeight: 600 }}>Exception summary – all {list.length} samples</div>
           <SummaryBullets items={list.map(sampleSummary)} />
-          <div style={{ marginTop: 12 }}>The results are ready for review. Send them to the reviewer to approve or reject.</div>
+          <div style={{ marginTop: 12 }}>The results are ready. Send them to the reviewer – they will approve or reject in the Reviewer view.</div>
         </>
       ),
       actions: [
-        { id: "review", label: "Review", primary: true, icon: ClipboardCheck },
+        { id: "review", label: "Send to reviewer", primary: true, icon: Send },
         { id: "new", label: "Start a new audit", icon: RotateCcw },
       ],
     });
   };
 
-  // ── Step 5: review / owner ──────────────────────────────────────────────
-  const openReview = async (fromMsg) => {
+  // ── Step 5: reviewer / owner ────────────────────────────────────────────
+  // Tester sends the results → reviewer approves or rejects in the Reviewer view →
+  // the owner is notified. A rejection names the phase where the issue is, and
+  // re-testing restarts from that phase.
+  const sendToReviewer = async (fromMsg) => {
+    if (stageRef.current !== "done") return;
     if (fromMsg) update(fromMsg, { used: true });
-    await say({ type: "jsx", content: <ReviewForm round={ctx.current.round} onSubmit={(r) => handlers.current.submitReview(r)} /> }, 250);
+    const round = ctx.current.round;
+    setSub({ id: nid(), round, date: today() });
+    setStage("review-pending");
+    await say(
+      {
+        type: "jsx",
+        content: (
+          <>
+            <StatusBanner tone="ok" title={`Round ${round} results sent to the reviewer`}>
+              The reviewer sees the verdict and the exception summary in the Reviewer view and will approve or reject. You are notified here with the outcome.
+            </StatusBanner>
+          </>
+        ),
+        actions: [{ id: "reviewer", label: "Open reviewer view", primary: true, icon: Eye }],
+      },
+      250
+    );
   };
 
-  handlers.current.submitReview = async ({ decision, comment, reviewer }) => {
-    const entry = { round: ctx.current.round, decision, comment, reviewer, date: today() };
-    setReviews((p) => [...p, entry]);
+  handlers.current.submitReview = async ({ decision, comment, reviewer, phase }) => {
+    const round = ctx.current.round;
+    setReviews((p) => [...p, { round, decision, comment, reviewer, phase, date: today() }]);
+    setSub(null);
     if (decision === "Approved") {
+      setStage("done");
       await sayText(
-        <>
-          <StatusBanner tone="ok" title={`Approved by ${reviewer}`}>
-            Testing for round {ctx.current.round} is signed off{comment ? ` – “${comment}”` : ""}. The review is recorded in the work paper's Review Log.
-          </StatusBanner>
-        </>
+        <StatusBanner tone="ok" title={`Approved by ${reviewer} – control owner notified`}>
+          Testing for round {round} is signed off{comment ? ` – “${comment}”` : ""}. The review is recorded in the work paper's Review Log.
+        </StatusBanner>
       );
-      return say({ type: "jsx", content: <div>Download the final, reviewed work paper.</div>, actions: [{ id: "download", label: "Download Testing Work Paper", primary: true, icon: Download }] }, 200);
+      return say(
+        {
+          type: "jsx",
+          content: <div>Download the final, reviewed work paper.</div>,
+          actions: [{ id: "download", label: "Download Testing Work Paper", primary: true, icon: Download }],
+        },
+        200
+      );
     }
     setStage("owner-pending");
     await say({
       type: "jsx",
       content: (
         <>
-          <StatusBanner tone="bad" title={`Rejected by ${reviewer} – observation sent to the control owner`}>“{comment}”</StatusBanner>
-          <div>The control owner can accept or reject this observation in the Control owner view.</div>
+          <StatusBanner tone="bad" title={`Rejected by ${reviewer} – issue in ${phaseLabel(phase)}. Control owner notified`}>
+            “{comment}”
+          </StatusBanner>
+          <div>
+            If the control owner accepts the observation, testing restarts from <strong>{phaseLabel(phase)}</strong> – not from evidence – and everything after that phase is
+            performed again.
+          </div>
         </>
       ),
       actions: [{ id: "owner", label: "Open control owner view", primary: true, icon: UserCheck }],
     });
   };
 
+  const restartFrom = async (phase, docs) => {
+    ctx.current.round += 1;
+    const round = ctx.current.round;
+    if (phase === "rcm") {
+      setStage("rcm");
+      return say({
+        type: "jsx",
+        content: (
+          <>
+            <StepBadge index={1} total={TOTAL} label={`RCM – round ${round}`} />
+            <div>Please upload the corrected RCM (Risk &amp; Control Matrix). Population, samples, evidence and testing are then performed again.</div>
+          </>
+        ),
+      });
+    }
+    if (phase === "population") {
+      setStage("source");
+      ctx.current.source = null;
+      ctx.current.sourceMsg = await say({ type: "jsx", content: sourceContent(null) });
+      return;
+    }
+    if (phase === "samples") {
+      setStage("samples");
+      return askSamples();
+    }
+    setStage("evidence");
+    return say({
+      type: "jsx",
+      content: (
+        <>
+          <StepBadge index={4} total={TOTAL} label={`Evidence – round ${round}`} />
+          <div>
+            Please upload the updated evidence for the samples (ticket history PDFs and approval emails)
+            {docs.length ? ", or I can re-test straight away with the documents the control owner provided" : ""}.
+          </div>
+        </>
+      ),
+      actions: docs.length ? [{ id: "retest-owner", label: "Re-test with the owner's documents", primary: true, icon: RefreshCw }] : [],
+    });
+  };
+
   const respond = async (idx, { decision, notes, docs }) => {
+    const review = ctx.current.reviews[idx];
     const owner = { decision, notes, docs, date: today() };
     setReviews((p) => p.map((r, i) => (i === idx ? { ...r, owner } : r)));
     setView("tester");
     const docLine = docs.length ? <div style={{ fontSize: 13, color: "#53565A", marginTop: 4 }}>Reference documents: {docs.join(", ")}</div> : null;
     if (decision === "Accepted") {
       await sayText(
-        <>
-          <StatusBanner tone="ok" title="Control owner accepted the observation – testing will be performed again">
-            {notes || "No notes added."}
-            {docLine}
-          </StatusBanner>
-        </>
-      );
-      ctx.current.round += 1;
-      setStage("evidence");
-      return say({
-        type: "jsx",
-        content: (
-          <>
-            <StepBadge index={4} total={TOTAL} label={`Evidence – round ${ctx.current.round}`} />
-            <div>
-              Please upload the updated evidence for the samples (ticket history PDFs and approval emails)
-              {docs.length ? ", or I can re-test straight away with the documents the control owner provided" : ""}.
-            </div>
-          </>
-        ),
-        actions: docs.length ? [{ id: "retest-owner", label: "Re-test with the owner's documents", primary: true, icon: RefreshCw }] : [],
-      });
-    }
-    await sayText(
-      <>
-        <StatusBanner tone="bad" title="Control owner rejected the observation – no re-test">
-          <strong>Reason:</strong> {notes}
+        <StatusBanner tone="ok" title={`Control owner accepted the observation – testing restarts from ${phaseLabel(review.phase)}`}>
+          {notes || "No notes added."}
           {docLine}
         </StatusBanner>
-      </>
+      );
+      return restartFrom(review.phase, docs);
+    }
+    await sayText(
+      <StatusBanner tone="bad" title="Control owner rejected the observation – no re-test">
+        <strong>Reason:</strong> {notes}
+        {docLine}
+      </StatusBanner>
     );
-    setStage("done");
+    setSub({ id: nid(), round: ctx.current.round, date: today(), note: "The control owner rejected your observation (see the reason in the review history below). No re-test was performed – please review again." });
+    setStage("review-pending");
     return say({
       type: "jsx",
-      content: <div>Reviewer: the owner's response is recorded. You can review again or download the work paper with the response in the Review Log.</div>,
-      actions: [
-        { id: "review", label: "Review again", primary: true, icon: ClipboardCheck },
-        { id: "download", label: "Download Testing Work Paper", icon: Download },
-      ],
+      content: <div>The owner's reason and documents are visible to the reviewer, who can approve or raise the observation again in the Reviewer view.</div>,
+      actions: [{ id: "reviewer", label: "Open reviewer view", primary: true, icon: Eye }],
     });
   };
 
@@ -591,13 +654,13 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       await downloadWP(wpData());
       return sayText("Downloading the Testing Work Paper.", 250);
     }
-    if (/review/.test(l)) return openReview();
+    if (/review/.test(l)) return sendToReviewer();
     if (/evidence|screenshot|annot/.test(l)) return showEvidence();
     if (/improve|recommend/.test(l)) return say({ type: "tables", tables: [improvementTable()] });
     if (/attribute/.test(l)) return say({ type: "tables", tables: [attributeTable(samples())] });
     if (/ipe|population|complete|accura/.test(l)) return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
     if (/exception|fail|sod|issue|why|summary/.test(l)) return say({ type: "jsx", content: <SummaryBullets items={samples().map(sampleSummary)} /> });
-    return sayText("I can explain the exceptions, show a sample (type its TR or CR number), the attribute summary, improvement opportunities or annotated evidence, start the review, or download the work paper.");
+    return sayText("I can explain the exceptions, show a sample (type its TR or CR number), the attribute summary, improvement opportunities or annotated evidence, send the results to the reviewer, or download the work paper.");
   };
 
   // ── buttons ─────────────────────────────────────────────────────────────
@@ -611,7 +674,8 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     if (action === "download") return downloadWP(wpData());
     if (action === "evidence") return showEvidence();
     if (action === "ipe") return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
-    if (action === "review") return openReview(msgId);
+    if (action === "review") return sendToReviewer(msgId);
+    if (action === "reviewer") return setView("reviewer");
     if (action === "owner") return setView("owner");
     if (action === "retest-owner") {
       if (stageRef.current !== "evidence") return;
@@ -676,16 +740,24 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       if (files.length) return runTesting(files.length);
       return sayText("Please attach the ticket history PDFs and approval emails for the selected samples.");
     }
+    if (st === "review-pending") return sayText("The results are with the reviewer – switch to the Reviewer view to approve or reject.");
     if (st === "owner-pending") return sayText("Waiting for the control owner to respond to the reviewer's observation – switch to the Control owner view.");
     if (st === "done" && text) return qa(text);
     if (text) return sayText("I'm working on it – one moment.", 200);
   };
 
-  const pending = reviews.filter((r) => r.decision === "Rejected" && !r.owner).length;
+  const list = samples();
+  const st = stats(list);
+  const summary = { verdict: st.verdict, total: list.length, passed: st.passed, exceptions: st.exceptions, bullets: list.map(sampleSummary) };
+  const badges = {
+    reviewer: submission ? 1 : 0,
+    owner: reviews.filter((r) => (r.decision === "Rejected" && !r.owner) || (r.decision === "Approved" && !r.ack)).length,
+  };
+  const controlName = `${RCM.controlId} · ${RCM.name}`;
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", backgroundColor: "#ffffff", minWidth: 0, height: "100%" }}>
-      <ViewToggle view={view} setView={setView} pending={pending} />
+      <ViewToggle view={view} setView={setView} badges={badges} />
       <div style={{ flex: 1, minHeight: 0, display: view === "tester" ? "flex" : "none", flexDirection: "column" }}>
         <MessageList ref={endRef} messages={messages} config={{}} onAction={onAction} />
         <InputArea
@@ -704,7 +776,15 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
           footnote="Demo environment · results are fixed for every upload · AI-assisted results should be reviewed by a qualified tester"
         />
       </div>
-      {view === "owner" && <OwnerPanel reviews={reviews} onRespond={respond} controlName={`${RCM.controlId} · ${RCM.name}`} />}
+      {view === "reviewer" && <ReviewerPanel submission={submission} summary={summary} reviews={reviews} onSubmit={(r) => handlers.current.submitReview(r)} controlName={controlName} />}
+      {view === "owner" && (
+        <OwnerPanel
+          reviews={reviews}
+          onRespond={respond}
+          onAck={(idx) => setReviews((p) => p.map((r, i) => (i === idx ? { ...r, ack: true } : r)))}
+          controlName={controlName}
+        />
+      )}
     </div>
   );
 }
