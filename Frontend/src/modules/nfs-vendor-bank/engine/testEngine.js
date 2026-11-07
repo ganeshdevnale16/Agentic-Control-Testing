@@ -433,6 +433,32 @@ export function runTest({ rcm, sop, evidence }) {
     refs: r.annotations.map((a) => a.ref),
   }));
 
+  // ── short exception summary for the final result (one line per exception) ──
+  const st = (id) => get(id)?.status;
+  const isEx = (id) => ["Deficiency", "Partial"].includes(st(id));
+  const sampleRef = v?.ref || "the walkthrough sample";
+  const summaryIntro = `On review of the design of control ${rcm.control.id} using walkthrough sample ${sampleRef}${T?.date ? ` (walkthrough ${fmtDate(T.date)})` : ""}, we noted the following exceptions`;
+  const summaryPoints = [];
+  if (isEx("A4")) {
+    const holder = chq?.holder ? titleCase(chq.holder) : "";
+    const gmail = (T?.emails || []).some((e) => /gmail|yahoo|outlook|hotmail|rediff/i.test(e));
+    summaryPoints.push(
+      `The document check (SOP ${f.docCheck?.ref?.split(" ")[0] || "5.3"}) only confirms the letter and cheque are attached${holder && v && norm(holder) !== norm(v.vendorName) ? ` – in the sample, the cheque was in the name of '${holder}', not the vendor '${v.vendorName}'` : ""}${gmail ? ", and the request came from a Gmail ID" : ""}.`
+    );
+  }
+  if (isEx("A5") && runsBetween[0]) {
+    const gap = Math.round((reviewAt - runsBetween[0].when) / 864e5);
+    summaryPoints.push(`The only independent check happens after payment – the bank change went live on ${short(changeAt)} and the vendor was paid on ${short(runsBetween[0].when)}, ${gap} days before the weekly review on ${short(reviewAt)}.`);
+  }
+  if (isEx("A6")) summaryPoints.push("SAP does not require approval of vendor bank changes – bank fields are not sensitive fields, so there is no dual control (FK08) or payment block.");
+  if (isEx("A7"))
+    summaryPoints.push(
+      `${conflicts.length} user${conflicts.length === 1 ? "" : "s"} (${conflicts.map((u) => u.user).join(", ")}) can both change vendor bank details and run payments${v?.docCheck?.byUser && v.docCheck.byUser === v.sap.user ? ", and the same person checked the documents and made the SAP change" : ""}.`
+    );
+  if (isEx("A8")) summaryPoints.push(`The weekly change report is extracted and filtered in Excel by the ${cm?.preparedBy ? "MDM team" : "reviewed team"} whose changes are reviewed, with no parameters or record count kept.`);
+  if (isEx("A9")) summaryPoints.push(`Exception handling is not defined – no timeline, payment hold or escalation (SOP section ${f.exceptions.ref || "7"}).`);
+  ["A1", "A2", "A3", "A10"].forEach((id) => isEx(id) && summaryPoints.push(`${get(id).attr.label}: ${get(id).observation}`));
+
   const limitations = [
     `Design only – test of one walkthrough sample${v ? ` (${v.ref})` : ""}. Operating effectiveness not tested.`,
     ...(T ? [] : ["No walkthrough transcript – inquiry evidence (T) not available."]),
@@ -450,6 +476,8 @@ export function runTest({ rcm, sop, evidence }) {
     observations,
     exceptions,
     exceptionSummary,
+    summaryIntro,
+    summaryPoints,
     trace,
     reviewNotes,
     pending: [],

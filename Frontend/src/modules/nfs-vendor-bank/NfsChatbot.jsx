@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, FileSpreadsheet, FileText, FolderOpen, MessageCircleQuestion, Play, RotateCcw, TableProperties, Upload } from "lucide-react";
+import { Download, FileText, FolderOpen, Play, RotateCcw, TableProperties, Upload } from "lucide-react";
 import MessageList from "../../components/MessageList";
 import InputArea from "../../components/InputArea";
 import StepBadge from "../../components/StepBadge";
@@ -381,10 +381,8 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
       500
     );
     await sleep(300);
-    await sayText("Ask me about any attribute or observation (for example “why is A4 deficient?”, “show the annotations for A7” or “who can run payments?”), or open the report.", 300, [
-      ...(c.result.exceptions.length ? [{ id: "explain", label: "Explain the observations", icon: MessageCircleQuestion }] : []),
+    await sayText("Ask me about any attribute or observation, e.g. “why is A4 deficient?”.", 300, [
       { id: "report", label: "View full report", icon: FileText },
-      { id: "excel", label: "Download workpaper", icon: FileSpreadsheet },
       { id: "new", label: "Start a new test", icon: RotateCcw },
     ]);
   };

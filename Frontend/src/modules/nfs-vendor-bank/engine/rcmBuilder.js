@@ -74,7 +74,7 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
     if (rev && f.review.frequency) add("Review frequency", new RegExp(f.review.frequency, "i").test(rev.frequency), `RCM: ${rev.frequency} · SOP: ${f.review.frequency}${f.review.day ? ` (${f.review.day})` : ""}`);
     if (f.callback.ref) {
       const rcmSilent = !/(vendor master|independent|on file|onboarding)/i.test(ctl.controlDesc);
-      add("Callback number source", !rcmSilent, rcmSilent ? "RCM does not say which number to call; SOP points to the request letter" : "RCM specifies an independent source", rcmSilent ? "Gap" : undefined);
+      add("Callback number source", !rcmSilent, rcmSilent ? "RCM does not say which number to call; SOP points to the request letter" : "RCM specifies an independent source", rcmSilent ? "Not adequate" : undefined);
     }
   } else add("Walkthrough", true, "Narrative walkthrough received – activities taken from the SOP", "Noted");
   if (transcript?.lines?.length) {
@@ -87,12 +87,12 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
   const design = [];
   const D = (id, area, status, severity, observation, recommendation, ref, attr) => design.push({ id, area, status, severity, observation, recommendation, ref, attr });
   const current = sop.reviewDue ? sop.reviewDue >= today : null;
-  D("D1", "SOP approval and currency", sop.approvedBy && current !== false ? "Adequate" : "Gap", sop.approvedBy && current !== false ? "–" : "Low",
+  D("D1", "SOP approval and currency", sop.approvedBy && current !== false ? "Effective" : "Not adequate", sop.approvedBy && current !== false ? "–" : "Low",
     `${sop.docId || "SOP"} v${sop.version || "?"} approved by ${sop.approvedBy || "–"} on ${fmtDate(sop.approvalDate)}; next review ${fmtDate(sop.reviewDue)}${current === false ? " – overdue" : ""}.`,
     current === false ? "Re-approve the SOP and confirm it reflects current practice." : "–", "Header", "A2");
   const dc = f.docCheck;
   const weakCheck = dc ? dc.presenceOnly : f.callback.source !== "master";
-  D("D2", "Precision of the request check", weakCheck ? "Gap" : "Adequate", weakCheck ? "High" : "–",
+  D("D2", "Precision of the request check", weakCheck ? "Not adequate" : "Effective", weakCheck ? "High" : "–",
     dc
       ? dc.presenceOnly
         ? `SOP ${dc.ref} asks the ${dc.performer || "MDM Executive"} only to ${dc.quote || "check that the documents are attached"}. There is no criterion to match the cheque account name to the vendor, the signatory to onboarding records or the sender email to the vendor master.`
@@ -104,7 +104,7 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
     dc?.ref || f.callback.ref, "A4");
   const checker = dc?.performer || f.callback.performer;
   const sameRole = checker && checker === f.update.performer;
-  D("D3", "Separation of verifier and maker", sameRole || !f.independentApproval ? "Gap" : "Adequate", sameRole || !f.independentApproval ? "High" : "–",
+  D("D3", "Separation of verifier and maker", sameRole || !f.independentApproval ? "Not adequate" : "Effective", sameRole || !f.independentApproval ? "High" : "–",
     sameRole
       ? `The ${checker} checks the request and also updates SAP (SOP ${[dc?.ref || f.callback.ref, f.update.ref].filter(Boolean).join(", ")}); no second person approves the change before it can be paid.`
       : f.independentApproval
@@ -113,28 +113,28 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
     sameRole || !f.independentApproval ? "Separate the verifier and maker; require a second user to confirm the change in SAP (FK08) before it is payable." : "–",
     [dc?.ref || f.callback.ref, f.update.ref].filter(Boolean).join(", "), "A7");
   const timingGap = /week/i.test(f.review.frequency) && f.paymentDays;
-  D("D4", "Timing of the independent check", timingGap ? "Gap" : "Adequate", timingGap ? "High" : "–",
+  D("D4", "Timing of the independent check", timingGap ? "Not adequate" : "Effective", timingGap ? "High" : "–",
     timingGap
       ? `The only independent check is the review ${f.review.day ? `every ${f.review.day}` : "weekly"} after the change is live, while payment runs happen on ${f.paymentDays}. A changed account can be paid before anyone reviews it.`
       : "Review timing is aligned to payment processing.",
     timingGap ? "Block payment to vendors with bank changes until confirmed, or review bank changes before each payment run." : "–", f.review.ref, "A5");
   const ipeGap = !f.review.completeness;
-  D("D5", "Reliability of the change report (IPE)", ipeGap ? "Gap" : "Adequate", ipeGap ? "Medium" : "–",
+  D("D5", "Reliability of the change report (IPE)", ipeGap ? "Not adequate" : "Effective", ipeGap ? "Medium" : "–",
     ipeGap
       ? `The ${f.review.preparer || "preparer"} extracts the report${f.review.toExcel ? " from SAP to Excel" : ""}; the reviewed team produces the review population and the SOP has no completeness step.`
       : "SOP requires completeness checks on the change report.",
     ipeGap ? "Run a saved SAP variant outside MDM, keep parameters and record counts, and reconcile to the unfiltered extract." : "–", f.review.ref, "A8");
-  D("D6", "Exception handling", f.exceptions.vague || !f.exceptions.text ? "Gap" : "Adequate", f.exceptions.vague || !f.exceptions.text ? "Low" : "–",
+  D("D6", "Exception handling", f.exceptions.vague || !f.exceptions.text ? "Not adequate" : "Effective", f.exceptions.vague || !f.exceptions.text ? "Low" : "–",
     f.exceptions.text ? `SOP ${f.exceptions.ref}: discrepancies are reported "for necessary action" – no timeline, payment hold or escalation.` : "SOP has no exception-handling step.",
     f.exceptions.vague || !f.exceptions.text ? "Define same-day payment hold, escalation to the CFO, bank recall within 24 hours and an incident log." : "–", f.exceptions.ref, "A9");
-  D("D7", "Record retention", f.retentionYears >= 8 ? "Adequate" : "Gap", f.retentionYears >= 8 ? "–" : "Low",
+  D("D7", "Record retention", f.retentionYears >= 8 ? "Effective" : "Not adequate", f.retentionYears >= 8 ? "–" : "Low",
     f.retentionYears ? `VCRFs and signed reviews retained for ${f.retentionYears} years.` : "No retention period stated.",
     f.retentionYears >= 8 ? "–" : "Retain records for at least 8 years (Companies Act, 2013 s.128).", f.retentionRef, "A10");
   D("D8", "System enforcement (IT dependency)", "To test", "–",
     "The SOP does not say whether SAP enforces approval of bank changes before they are payable (sensitive fields, FK08 dual control, payment block) – tested with the configuration extract.",
     "–", "–", "A6");
 
-  const gaps = design.filter((d) => d.status === "Gap");
+  const gaps = design.filter((d) => d.status === "Not adequate");
   const designConclusion = gaps.some((g) => g.severity === "High") ? "Design gaps indicated – to be concluded by the test of design" : gaps.length ? "Minor design points – to be confirmed by the test of design" : "No design gaps indicated";
 
   // ── test of design attributes (the test plan) ─────────────────────────
@@ -266,8 +266,8 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
 
 function designFor(kind, design) {
   const map = { request: ["D2"], check: ["D2", "D3"], callback: ["D2", "D3"], update: ["D3"], review: ["D4", "D5", "D6"] };
-  const g = design.filter((d) => (map[kind] || []).includes(d.id) && d.status === "Gap");
-  return g.length ? `Gap – ${g.map((x) => x.id).join(", ")}` : "Adequate";
+  const g = design.filter((d) => (map[kind] || []).includes(d.id) && d.status === "Not adequate");
+  return g.length ? `Not adequate – ${g.map((x) => x.id).join(", ")}` : "Effective";
 }
 
 // Steps shown in the live checklist while the RCM is being built
@@ -288,9 +288,10 @@ function buildProcedures({ sop, wt, transcript, acts, consistency, design, attri
     ],
     points: [`${plural(sop.sections.length, "section")} read; ${plural(sop.roles.length, "role")} identified.`],
   });
-  procs.push({
+  if (wt)
+    procs.push({
     id: "p-wt",
-    label: "Read the walkthrough / existing RCM",
+    label: "Read the walkthrough notes / RCM extract",
     detail: wt ? `${wt.name}${wt.sheet ? ` › ${wt.sheet}` : ""}` : "No walkthrough file – activities taken from the SOP",
     subChecks: wt?.controls?.length
       ? [
@@ -301,6 +302,16 @@ function buildProcedures({ sop, wt, transcript, acts, consistency, design, attri
         ]
       : [s(wt ? "Narrative walkthrough read – used to confirm the SOP" : "No walkthrough provided", "info")],
   });
+  if (!wt && transcript)
+    procs.push({
+      id: "p-acts",
+      label: "Identify the control activities",
+      detail: "Taken from the SOP and confirmed against the walkthrough",
+      subChecks: [
+        s(`Split the control into ${plural(acts.length, "activity", "activities")}: ${acts.map((a) => `(${a.letter}) ${a.name}`).join("; ")}`),
+        s(`Type / frequency per activity: ${acts.map((a) => `${a.letter} ${a.type}, ${a.frequency}`).join("; ")}`),
+      ],
+    });
   if (transcript)
     procs.push({
       id: "p-tr",
@@ -322,8 +333,8 @@ function buildProcedures({ sop, wt, transcript, acts, consistency, design, attri
     id: "p-design",
     label: "Preliminary design read of the SOP",
     detail: "Could the control, as written, prevent or detect a fraudulent bank-detail change in time? Concluded by the test of design in step 4.",
-    subChecks: design.map((d) => s(`${d.id} ${d.area}: ${d.status === "Gap" ? `gap (${d.severity})` : d.status.toLowerCase()}`, d.status === "Gap" ? (d.severity === "Low" ? "info" : "exception") : d.status === "To test" ? "info" : "pass", `[DESIGN] ${d.id} ${d.area} – ${d.status}`)),
-    points: design.filter((d) => d.status === "Gap" && d.severity === "High").map((d) => `${d.id}: ${d.observation}`),
+    subChecks: design.map((d) => s(`${d.id} ${d.area}: ${d.status === "Not adequate" ? `not adequate (${d.severity})` : d.status.toLowerCase()}`, d.status === "Not adequate" ? (d.severity === "Low" ? "info" : "exception") : d.status === "To test" ? "info" : "pass", `[DESIGN] ${d.id} ${d.area} – ${d.status}`)),
+    points: design.filter((d) => d.status === "Not adequate" && d.severity === "High").map((d) => `${d.id}: ${d.observation}`),
   });
   procs.push({
     id: "p-rcm",
