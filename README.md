@@ -101,39 +101,41 @@ This is a scripted demo: any uploaded file gives the same result. Round 2 tests 
 
 ---
 
-# Module 3 – Non-FS Control Testing: Vendor Bank-Detail Change (P2P-04)
+# Module 3 – Non-FS Control Testing: Vendor bank-detail change (P2P-04) – test of design
 
-Third assistant on the home menu. Own chat flow in `src/modules/nfs-vendor-bank/` (the ITGC module is unchanged;
-`Workspace.jsx` now uses `config.Chat` when a module brings its own chat).
+Flow (unchanged): **1** upload SOP, RCM and walkthrough transcript → **2** walkthrough checked against the SOP, RCM and
+test-of-design plan generated → **3** upload evidence → **4** test of design, observations, report and workpaper.
 
-## Flow
-1. **Create RCM** – user starts the RCM, then uploads the **SOP** and the **walkthrough file** (walkthrough notes or
-   existing RCM extract). Files are recognised by content, not file name.
-2. **Validate & generate RCM** – live processing: reads the SOP (sections, roles, approvals), splits the walkthrough
-   control into activities (a)–(d), checks walkthrough vs SOP, runs a design assessment (D1–D9) and generates the RCM,
-   test attributes (A1–A9), sample sizes and evidence request list (E1–E5). RCM downloadable as Excel.
-3. **Evidence** – user uploads VCRF(s), SAP config/access extract, payment run calendar and weekly change report
-   (any order, any number of files). Status table shows what is still missing; can run with partial evidence.
-4. **Testing & results** – live processing per attribute, conclusion (design + operating), exceptions written as
-   condition / criteria / cause / effect / recommendation, payment exposure, limitations and outstanding requests.
-   Full report (Print / Save as PDF) and Excel workpaper (Summary, RCM, Walkthrough vs SOP, Design Assessment, Test
-   Plan, Evidence Request, Testing, Narratives, Exceptions, Payment Exposure, Outstanding Requests, Evidence Index,
-   Processing Log). Q&A after the test ("why did A2 fail?", "who can run payments?", "design gaps", "exposure").
+## What it tests (aligned to WP-P2P-04-TOD)
+Ten design attributes, each concluded Pass / Deficiency / Partial with tick marks (✓ ✗ ◐, T = corroborated in the transcript):
+A1 Risk linkage · A2 Policy governance · A3 Ownership and authority · A4 Precision and criteria · A5 Frequency and timing ·
+A6 System alignment · A7 Segregation of duties · A8 Information used (IPE) · A9 Exceptions and escalation · A10 Evidence of performance.
 
-Demo files live in `public/demo/nfs/` ("Try with demo files" / "Use demo evidence" buttons load them through the same
-upload path).
+Every finding is an annotation **A{n}-{k}** pointing to the exact text (PDF page) or cells (Excel range) in the source,
+found by reading the files – e.g. A4-2: the cheque is in the name of *Sri Murugan Casting Works*, not the vendor *Sri Murugan Castings*.
 
-## Where things live
+## Demo files (`public/demo/nfs`)
+| Ref | File | Step |
+|---|---|---|
+| NFS-01 | SOP-FIN-012 v3.0 (5.3 = document check: letter and cheque attached) | 1 |
+| NFS-02 | RCM extract – P2P-04 | 1 |
+| NFS-06 | Walkthrough transcript 14-Oct-2026 | 1 |
+| NFS-03 | SAP sensitive fields, user access (SUIM), F110 calendar | 3 |
+| NFS-04 | VCRF VCR-2026-0389 with document check and sender email | 3 |
+| NFS-05 | Weekly change report W38 with sign-off | 3 |
+| NFS-07 | Cancelled cheque (VCRF attachment 2) | 3 |
+
+## Workpaper (Excel) – same layout as WP-P2P-04-TOD
+Cover · Legend · ToD Testing · Walkthrough Trace · Annotation Index (links to the annotated copy) · Observations (O1–O5, draft for
+management response) · Review & Sign-off (reviewer-agent notes RN-1… and human sign-off fields) · **Annotated Evidence** (each
+source page / sheet with highlights and A{n}-{k} tags, coloured by result) · RCM, evidence inputs and processing log.
+
+## Code
 | Path | What |
 |---|---|
-| `nfs-vendor-bank/NfsChatbot.jsx` | Conversation flow (start → docs → building → evidence → testing → done) and Q&A |
-| `nfs-vendor-bank/engine/readers.js` | Read PDF/Word/Excel, classify each file by content |
-| `nfs-vendor-bank/engine/sopParser.js` | SOP → header, sections, roles and design facts (callback source, maker-checker, review timing…) |
-| `nfs-vendor-bank/engine/walkthroughParser.js` | Walkthrough / RCM extract → control, activities, type & frequency per activity |
-| `nfs-vendor-bank/engine/rcmBuilder.js` | Walkthrough vs SOP checks, design assessment, RCM rows, test plan, evidence requests |
-| `nfs-vendor-bank/engine/evidenceParser.js` | VCRF, sensitive fields, user access, payment runs, change report and sign-off |
-| `nfs-vendor-bank/engine/testEngine.js` | A1–A9 tests, exceptions, exposure, conclusion, processing steps |
-| `nfs-vendor-bank/exportNfs.js` | RCM and workpaper Excel |
-| `nfs-vendor-bank/components/` | Results dashboard and printable report |
-
-All logic is rule-based and runs in the browser on the actual file contents – change the data and the results change.
+| `engine/transcriptParser.js` | Reads the walkthrough transcript (time stamp, speaker, page) |
+| `engine/evidenceParser.js` | VCRF (document check, sender), cancelled cheque, Excel evidence |
+| `engine/rcmBuilder.js` | RCM, preliminary design read, A1–A10 test-of-design plan |
+| `engine/testEngine.js` | Test of design, annotations, walkthrough trace, observations, review notes |
+| `annotate.js` | Draws the annotated evidence (PDF pages via pdf.js, Excel ranges) |
+| `exportNfs.js` | RCM download and the WP-…-TOD workpaper |

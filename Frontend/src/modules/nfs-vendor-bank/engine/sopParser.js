@@ -72,6 +72,7 @@ export function parseSop(text, name) {
   const req = find(/letterhead|request.*(submit|letter)/i);
   const vcrf = find(/prepare.*(VCRF|change request form)/i);
   const callback = find(/call ?back|call the vendor/i);
+  const docCheck = find(/document check|check that the request/i);
   const update = find(/update.*(SAP|system)|\bXK02\b|\bFK02\b/i);
   const reviewSec = top.find((s) => /review/i.test(s.title)) || find(/weekly|sign off|sign-off/i);
   const reviewText = reviewSec ? clauses.filter((s) => s.num === reviewSec.num || s.num.startsWith(`${reviewSec.num}.`)).map((s) => s.text).join(" ") : "";
@@ -99,6 +100,15 @@ export function parseSop(text, name) {
       cheque: /cancelled cheque|cancelled check/i.test(req?.text || ""),
     },
     vcrf: { ref: ref(vcrf), preparer: subjectOf(vcrf?.text || "", "prepare") },
+    docCheck: docCheck
+      ? {
+          ref: ref(docCheck),
+          text: docCheck.text,
+          performer: subjectOf(docCheck.text, "check"),
+          presenceOnly: /attached|present/i.test(docCheck.text) && !/(match|agree|compar|verif\w+ (the )?(name|account|signatory|email|domain))/i.test(docCheck.text),
+          quote: (docCheck.text.match(/check that the [^.]*?attached/i) || [])[0] || "",
+        }
+      : null,
     callback: { ref: ref(callback), text: cbText, source: callbackSource, performer: subjectOf(cbText, "call"), recordsDetail: /date.*time.*number/i.test(cbText) },
     update: { ref: ref(update), text: update?.text || "", performer: subjectOf(update?.text || "", "update"), txn: ((update?.text || "").match(/\b(XK02|FK02|BP|XK01|FK01)\b/) || [])[1] || "" },
     independentApproval,
@@ -125,6 +135,7 @@ export function parseSop(text, name) {
 
   return {
     name,
+    raw: text,
     title: clean(titleLine.replace(/^standard operating procedure:\s*/i, "")),
     docId,
     version,

@@ -28,6 +28,8 @@ export async function readDoc(file) {
 export function classify(doc) {
   const t = doc.text || "";
   if (doc.kind === "text") {
+    if (/cancell?ed/i.test(t) && /\bIFSC\b/.test(t) && /A\/c\s*No|account no/i.test(t) && !/vendor code/i.test(t)) return "cheque";
+    if (/walk[\s-]?through/i.test(t) && (/transcript/i.test(t) || /\[\d{2}:\d{2}:\d{2}\]/.test(t))) return "transcript";
     if (/\bVCR-\d{4}-\d{3,}/.test(t) && /vendor code/i.test(t)) return "vcrf";
     if (/standard operating procedure|\bSOP[-\s]?[A-Z]{2,}-?\d/i.test(t)) return "sop";
     if (/walk[\s-]?through/i.test(t)) return "walkthrough";
@@ -57,6 +59,8 @@ export const KIND_LABEL = {
   sop: "Standard operating procedure",
   rcm: "Walkthrough / existing RCM",
   walkthrough: "Walkthrough notes",
+  transcript: "Walkthrough transcript",
+  cheque: "Cancelled cheque (VCRF attachment)",
   vcrf: "Vendor change request form (VCRF)",
   config: "SAP configuration & access extract",
   review: "Weekly change report & sign-off",

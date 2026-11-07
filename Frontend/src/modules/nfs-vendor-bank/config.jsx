@@ -5,7 +5,7 @@ export const nfsVendorBankModule = {
   Chat: NfsChatbot,
   menu: {
     title: "Non-FS Control Testing – Vendor Bank-Detail Change",
-    tagline: "Builds the RCM from your SOP and walkthrough, then tests design and operating effectiveness from the evidence",
+    tagline: "Builds the RCM from your SOP and walkthrough, then tests the design of the control with annotated evidence",
     badge: "Non-FS · Procure-to-Pay",
     accent: "#0D8390",
   },
@@ -13,8 +13,8 @@ export const nfsVendorBankModule = {
     assistantName: "Non-FS control testing assistant",
     intro: (
       <>
-        I build the <strong>risk and control matrix</strong> for a process from its SOP and walkthrough, assess whether the control is designed well, then test it on the evidence you give me and write up
-        the results, exceptions and workpaper – the way an auditor would.
+        I build the <strong>risk and control matrix</strong> for a process from its SOP, RCM and walkthrough, then perform the <strong>test of design</strong> on a walkthrough sample – every attribute
+        concluded against the evidence, every finding annotated to the exact text or cells – and write up the observations and the workpaper, the way an auditor would.
       </>
     ),
     summaryTable: {
@@ -25,10 +25,10 @@ export const nfsVendorBankModule = {
         { key: "need", label: "What I need from you", minWidth: 220 },
       ],
       rows: [
-        { step: "1", what: "Upload the SOP and the walkthrough file", need: "SOP (PDF / Word) and walkthrough notes or RCM extract" },
-        { step: "2", what: "I check the walkthrough against the SOP, assess the design and generate the RCM and test plan", need: "Nothing – watch the processing" },
-        { step: "3", what: "Upload the evidence listed in the test plan", need: "VCRF, SAP config & access extract, payment runs, weekly review" },
-        { step: "4", what: "I test every attribute and give you the conclusion, exceptions, report and Excel workpaper", need: "Nothing" },
+        { step: "1", what: "Upload the SOP, RCM extract and walkthrough transcript", need: "SOP (PDF / Word), RCM (Excel), walkthrough transcript or notes" },
+        { step: "2", what: "I check the walkthrough against the SOP, read the design and generate the RCM and the test-of-design plan (A1–A10)", need: "Nothing – watch the processing" },
+        { step: "3", what: "Upload the evidence for the walkthrough sample", need: "VCRF, cancelled cheque, SAP config & access extract, weekly review" },
+        { step: "4", what: "I test the design of every attribute, annotate the evidence and give you the conclusion, observations, report and Excel workpaper", need: "Nothing" },
       ],
     },
     closing: <div>Shall we create the RCM? Press Create RCM, or try the whole flow with the demo files.</div>,

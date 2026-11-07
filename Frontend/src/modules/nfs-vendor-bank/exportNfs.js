@@ -133,76 +133,201 @@ export async function downloadRcm(rcm, sop) {
   saveAs(new Blob([await wb.xlsx.writeBuffer()]), `RCM_${rcm.control.id}_${stamp()}.xlsx`);
 }
 
+// ── Test-of-design workpaper (WP-<control>-TOD) ───────────────────────────
+const RES = { pass: ["FFE3F1CC", "FF26890D"], deficiency: ["FFFDE2DF", "FFC00000"], partial: ["FFFFF1D6", "FF9A3412"], "not tested": ["FFF2F2F2", "FF53565A"] };
+const resCell = (cell) => {
+  const c = RES[String(cell.value ?? "").toLowerCase()];
+  if (!c) return;
+  cell.fill = FILL(c[0]);
+  cell.font = { bold: true, color: { argb: c[1] } };
+};
+const headRow = (row) =>
+  row.eachCell((c) => {
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = FILL("FF000000");
+    c.alignment = { vertical: "middle", wrapText: true };
+    c.border = BORDER;
+  });
+const titleRows = (ws, title, sub) => {
+  ws.addRow([title]).font = { bold: true, size: 14 };
+  ws.addRow([sub || ""]).font = { italic: true, color: { argb: "FF53565A" } };
+  ws.addRow([]);
+};
+function grid(ws, widths, header, rows, { resultCol, heights = 15 } = {}) {
+  ws.columns = widths.map((w) => ({ width: w }));
+  headRow(ws.addRow(header));
+  rows.forEach((r) => {
+    const row = ws.addRow(r);
+    let max = 1;
+    row.eachCell({ includeEmpty: true }, (c, i) => {
+      c.alignment = { vertical: "top", wrapText: true };
+      c.border = BORDER;
+      max = Math.max(max, lines(c.value, widths[i - 1] || 12));
+    });
+    row.height = Math.min(320, Math.max(18, max * heights));
+    if (resultCol) resCell(row.getCell(resultCol));
+  });
+  return ws;
+}
+const ownerName = (o) => {
+  const m = String(o).match(/^(.*?)\s[-–]\s(.*)$/);
+  return m ? `${m[2]}, ${m[1]}` : o;
+};
+
 export async function downloadWorkpaper(result) {
-  const { summary, control, rcm, sop, meta } = result;
+  const { summary, control, rcm, meta, results, annotations, observations, trace, reviewNotes } = result;
+  const ref = meta.reference;
+  const today = fmtDate(new Date());
   const wb = new ExcelJS.Workbook();
   wb.creator = "Agentic Controls Testing";
   wb.created = new Date();
-  kvSheet(wb, "Summary", `${control.id} Vendor bank-detail change – control test workpaper`, `${meta.company} · ${meta.reference}`, [
-    ["Conclusion", [
-      ["Overall conclusion", summary.conclusion, true],
-      ["Design", summary.designConclusion],
-      ["Operating effectiveness", summary.operatingConclusion],
-      ["Summary", summary.headline],
-      ["Deficiency assessment", summary.deficiency],
-      ["Attributes tested / passed", `${summary.tested} / ${summary.passed}`],
-      ["Exceptions (High)", `${summary.exceptions} (${summary.high})`],
-      ["Design gaps", String(summary.gaps)],
-    ]],
-    ["Control", [
-      ["Process", `${control.process} › ${control.subProcess}`],
-      ["Risk", `${control.riskId} – ${control.riskDesc}`],
-      ["Control", control.description],
-      ["Type / nature / frequency", `${control.type} · ${control.nature} · ${control.frequency}`],
-      ["Owner", control.owner],
-      ["Assertion", control.assertion],
-    ]],
-    ["Test details", [
-      ["SOP", `${sop.name} – ${sop.docId} v${sop.version}`],
-      ["Period tested", meta.period],
-      ["Evidence files", meta.files.map((f) => f.name).join("\n")],
-      ["Prepared by", `Agentic Controls Testing · ${meta.testedAt.toLocaleString()}`],
-      ["Reviewed by", ""],
-      ["Review date", ""],
-    ]],
-    ["Limitations and outstanding requests", result.limitations.map((l, i) => [`L${i + 1}`, l])],
+
+  // annotated copies of the evidence (browser canvas); skipped if unavailable
+  let annotated = [];
+  try {
+    const { buildAnnotatedEvidence } = await import("./annotate");
+    annotated = await buildAnnotatedEvidence(result.sources, annotations);
+  } catch (e) {
+    console.warn("annotated evidence skipped", e);
+  }
+  const annotatedRow = {};
+
+  // 1. Cover
+  const cover = wb.addWorksheet("Cover", { properties: { tabColor: { argb: "FF86BC25" } } });
+  cover.columns = [{ width: 24 }, { width: 110 }];
+  cover.addRow([`${meta.company} - Design Testing Workpaper ${ref}`]).font = { bold: true, size: 14 };
+  cover.addRow([]);
+  const codes = meta.inputs.map((i) => i.code).sort();
+  const version = rcm.wt?.meta?.version || "";
+  [
+    ["Workpaper ref", ref],
+    ["Engagement", `Internal Audit - ICFR design assessment${version ? ` ${version}` : ""}`],
+    ["Process / sub-process", `${control.process} / ${control.subProcess}`],
+    ["Control ID", `${control.id} - Vendor bank-detail change control`],
+    ["Risk", `${control.riskId}: ${control.riskDesc}`],
+    ["Control owner", ownerName(control.owner)],
+    ["Objective", `Assess whether ${control.id}, as designed, prevents or timely detects unauthorised vendor bank-detail changes before payment.`],
+    ["Scope", `Design only (test of one walkthrough sample ${(meta.sample.match(/VCR-[\d-]+/) || [meta.sample])[0]}). Operating effectiveness not tested.`],
+    ["Evidence inputs", `${codes[0]} to ${codes[codes.length - 1]} (see 'Annotation Index'; annotated copies in sheet 'Annotated Evidence')`],
+    ["Walkthrough date", fmtDate(meta.walkthroughDate)],
+    ["Prepared by", `DT-Agent (Assessment agent) - ${today}`],
+    ["First-level review", `DT-Agent (Reviewer agent) - ${today}`],
+    ["Human review", "Pending - see 'Review & Sign-off'"],
+    ["Design conclusion", summary.designConclusion],
+    ["Summary", `${summary.headline} ${summary.deficiency}`.trim()],
+  ].forEach(([k, v]) => {
+    const r = cover.addRow([k, v]);
+    r.getCell(1).font = { bold: true };
+    r.eachCell((c) => {
+      c.border = BORDER;
+      c.alignment = { vertical: "top", wrapText: true };
+    });
+    r.height = Math.max(18, lines(v, 110) * 15);
+    if (k === "Design conclusion") {
+      r.getCell(2).font = { bold: true, color: { argb: summary.designEffective ? "FF26890D" : "FFC00000" } };
+      r.getCell(2).fill = FILL(summary.designEffective ? "FFE3F1CC" : "FFFDE2DF");
+    }
+  });
+
+  // 2. Legend
+  const lg = wb.addWorksheet("Legend");
+  titleRows(lg, "Tick marks and annotation legend");
+  lg.spliceRows(2, 1);
+  grid(lg, [26, 90], ["Symbol / colour", "Meaning"], [
+    ["Green highlight / tag", "Attribute result: Pass"],
+    ["Red highlight / tag", "Attribute result: Deficiency"],
+    ["Amber highlight / tag", "Attribute result: Partial"],
+    ["A{n}-{k}", "Annotation k supporting attribute A{n}; same ID appears on the annotated evidence, in 'Annotation Index' and in 'ToD Testing'"],
+    ["✓", "Agreed to source without exception"],
+    ["✗", "Exception / design gap noted"],
+    ["◐", "Partially meets criterion"],
+    ["T", `Corroborated in walkthrough transcript (${meta.inputs.find((i) => /transcript/i.test(i.name))?.code || "walkthrough"})`],
   ]);
+  [4, 5, 6].forEach((r, i) => (lg.getCell(`A${r}`).fill = FILL(["FFE3F1CC", "FFFDE2DF", "FFFFF1D6"][i])));
+
+  // 3. ToD Testing
+  const tod = wb.addWorksheet("ToD Testing");
+  titleRows(tod, `${ref} - Test of design by attribute`, `Sample: ${meta.sample.replace(/\s*\(([^,]+), vendor (\d+)\)/, " ($1, vendor $2)")}`);
+  grid(tod, [7, 22, 34, 44, 34, 70, 12, 10], ["Attr", "Attribute", "Design criterion", "Procedure performed", "Evidence / annotation refs", "Observation", "Result", "Tick mark"],
+    results.map((r) => [r.attr.id, r.attr.label, r.attr.criterion, r.attr.procedure, r.annotations.map((a) => `${a.ref} (${a.code})`).join("; ") || "–", r.observation, r.status, r.tick]),
+    { resultCol: 7 });
+  tod.views = [{ state: "frozen", ySplit: 4 }];
+
+  // 4. Walkthrough Trace
+  const wtr = wb.addWorksheet("Walkthrough Trace");
+  titleRows(wtr, `${ref} - Walkthrough trace of ${(meta.sample.match(/VCR-[\d-]+/) || [meta.sample])[0]}`, "Each step traced from SOP to evidence and transcript");
+  grid(wtr, [6, 10, 36, 60, 22, 24, 40], ["Step", "SOP ref", "Designed step", "Evidence observed", "Transcript", "Performed as designed?", "Annotation / note"],
+    trace.map((t) => [t.step, t.sopRef, t.designed, t.observed, t.transcript, t.performed, t.note]));
+
+  // rows where each annotated image will sit (sheet is added after the template sheets)
+  const imgH = (img) => Math.round((img.height / img.width) * Math.min(860, img.width));
+  let row = 4;
+  annotated.forEach((img) => {
+    img.refs.forEach((r) => (annotatedRow[r] = annotatedRow[r] || row));
+    row += Math.ceil(imgH(img) / 20) + 3;
+  });
+
+  // 5. Annotation Index
+  const idx = wb.addWorksheet("Annotation Index");
+  titleRows(idx, `${ref} - Annotation index`, "Click the annotated file to open the highlighted copy in 'Annotated Evidence'");
+  grid(idx, [8, 26, 12, 9, 44, 28, 34, 60], ["Ref", "Attribute", "Result", "Evidence", "Annotated file", "Location", "Highlighted text / cells", "Annotation"],
+    annotations.map((a) => {
+      const r = results.find((x) => x.attr.id === a.attr);
+      return [a.ref, `${a.attr} ${r?.attr.label || ""}`, a.result, a.code, a.file.replace(/(\.[a-z]+)$/i, "_ANNOTATED$1"), a.location, a.highlight, a.note];
+    }),
+    { resultCol: 3 });
+  idx.eachRow((r, i) => {
+    if (i < 5) return;
+    const refId = r.getCell(1).value;
+    const target = annotatedRow[refId];
+    if (target) {
+      const c = r.getCell(5);
+      c.value = { text: String(c.value), hyperlink: `#'Annotated Evidence'!A${target}` };
+      c.font = { color: { argb: "FF0563C1" }, underline: true };
+    }
+  });
+
+  // 6. Observations
+  const ob = wb.addWorksheet("Observations");
+  titleRows(ob, `${ref} - Design observations (draft for management response)`);
+  ob.spliceRows(2, 1);
+  grid(ob, [6, 9, 30, 60, 40, 60, 22, 26, 18], ["Obs", "Attr", "Title", "Condition", "Risk / effect", "Recommendation", "Annotation refs", "Management response", "Owner / due date"],
+    observations.map((o) => [o.id, o.attrText, o.title, o.condition, o.effect, o.recommendation, o.refs, "", ""]));
+
+  // 7. Review & Sign-off
+  const rv = wb.addWorksheet("Review & Sign-off");
+  titleRows(rv, `${ref} - Review notes and sign-off`);
+  rv.spliceRows(2, 1);
+  grid(rv, [8, 18, 56, 70, 10], ["Ref", "Raised by", "Review point", "Response", "Status"], reviewNotes.map((n) => [n.ref, n.by, n.point, n.response, n.status]));
+  rv.addRow([]);
+  ["Human reviewer name", "Review date", "Conclusion accepted? (Yes / Override)", "Severity confirmed", "Override rationale"].forEach((k) => {
+    const r = rv.addRow(["", k, ""]);
+    r.getCell(2).font = { bold: true };
+    [2, 3].forEach((i) => (r.getCell(i).border = BORDER));
+  });
+
+  // 8. Annotated evidence
+  const aev2 = wb.addWorksheet("Annotated Evidence");
+  aev2.columns = Array.from({ length: 12 }, () => ({ width: 12 }));
+  aev2.addRow([`${ref} - Annotated evidence`]).font = { bold: true, size: 14 };
+  aev2.addRow([annotated.length ? "Highlights and tags A{n}-{k} drawn on the source documents; colour = attribute result." : "Annotated copies could not be generated in this environment – see 'Annotation Index' for locations."]).font = { italic: true, color: { argb: "FF53565A" } };
+  row = 4;
+  annotated.forEach((img) => {
+    aev2.getCell(`A${row}`).value = `${img.code} – ${img.title}  ·  ${img.refs.join(", ")}`;
+    aev2.getCell(`A${row}`).font = { bold: true };
+    const id = wb.addImage({ base64: img.dataUrl, extension: "png" });
+    aev2.addImage(id, { tl: { col: 0, row }, ext: { width: Math.min(860, img.width), height: imgH(img) } });
+    row += Math.ceil(imgH(img) / 20) + 3;
+  });
+
+  // supporting sheets
   rcmSheets(wb, rcm);
-  table(
-    wb,
-    "Testing",
-    [["id", "Attribute", 9], ["label", "Attribute description", 34], ["item", "Item tested", 36], ["expected", "Expected", 34], ["actual", "Actual", 50], ["result", "Item result", 13], ["status", "Attribute result", 14], ["ex", "Exception", 10]],
-    result.results.flatMap((r) =>
-      (r.details.length ? r.details : [{ item: "–", expected: "–", actual: r.observation, result: r.status }]).map((d) => ({ id: r.attr.id, label: r.attr.label, item: d.item, expected: d.expected, actual: d.actual, result: d.result, status: r.status, ex: r.exceptionId || "" }))
-    ),
-    ["result", "status"]
-  );
-  table(
-    wb,
-    "Narratives",
-    [["id", "Attribute", 9], ["label", "Attribute", 34], ["procedure", "Procedure", 55], ["observation", "Observation", 80], ["conclusion", "Conclusion", 30]],
-    result.results.map((r) => ({ id: r.attr.id, label: r.attr.label, ...r.narrative }))
-  );
-  table(
-    wb,
-    "Exceptions",
-    [["id", "ID", 8], ["title", "Exception", 32], ["type", "Type", 18], ["severity", "Severity", 10], ["condition", "Condition", 60], ["criteria", "Criteria", 45], ["cause", "Cause", 45], ["effect", "Effect / risk", 45], ["recommendation", "Recommendation", 55], ["owner", "Owner", 20], ["response", "Management response", 30], ["target", "Target date", 12], ["status", "Status", 10]],
-    result.exceptions.map((e) => ({ ...e, status: "Open" })),
-    ["severity"]
-  );
-  table(
-    wb,
-    "Payment Exposure",
-    [["runId", "Run ID", 12], ["date", "Run date", 13], ["by", "Executed by", 12], ["vendors", "Vendors paid", 12], ["amount", "Amount (INR)", 16], ["changes", "Unreviewed bank changes at run time", 50]],
-    result.exposure.map((r) => ({ ...r, changes: r.changesBefore.map((c) => `${c.code} ${c.name} (${c.by}, ${c.on})`).join("\n") }))
-  );
-  table(wb, "Outstanding Requests", [["ref", "VCRF", 16], ["code", "Vendor", 10], ["name", "Vendor name", 26], ["by", "Changed by", 12], ["on", "Changed on", 13]], result.pending);
-  table(wb, "Evidence Index", [["name", "File", 50], ["label", "Recognised as", 40]], meta.files);
+  table(wb, "Evidence Inputs", [["code", "Ref", 9], ["name", "File", 60]], meta.inputs);
   table(
     wb,
     "Processing Log",
     [["time", "Time", 12], ["text", "Activity", 110]],
     [...(result.rcmLog || []), ...(result.log || [])].map((l) => ({ time: l.time.toLocaleTimeString([], { hour12: false }), text: l.text }))
   );
-  saveAs(new Blob([await wb.xlsx.writeBuffer()]), `Workpaper_${control.id}_Vendor_Bank_Change_${stamp()}.xlsx`);
+  saveAs(new Blob([await wb.xlsx.writeBuffer()]), `${ref}_Design_Test_Workpaper_${stamp()}.xlsx`);
 }

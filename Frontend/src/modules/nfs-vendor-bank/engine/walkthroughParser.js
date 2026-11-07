@@ -75,6 +75,7 @@ export function parseWalkthrough(doc) {
     name: doc.name,
     source: "rcm",
     sheet: sheet.name,
+    cols,
     controls,
     meta: {
       company: pre[0] || "",

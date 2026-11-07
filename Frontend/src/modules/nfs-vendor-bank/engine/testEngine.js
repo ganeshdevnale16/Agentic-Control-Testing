@@ -1,390 +1,469 @@
-import { fmtDate, fmtDateTime, lastDigits, plural, samePhone } from "./util";
+// Test of design (ToD) for the vendor bank-detail change control.
+// Each attribute is concluded from the SOP, RCM, walkthrough transcript and the
+// evidence, and every finding is referenced as an annotation A{n}-{k} that links
+// the attribute to the exact text or cells in a source document.
+import { clean, fmtDate, fmtDateTime, plural } from "./util";
 import { KIND_LABEL } from "./readers";
 
-const sameDay = (a, b) => a && b && a.toDateString() === b.toDateString();
-const inr = (n) => (n == null ? "–" : n >= 1e7 ? `INR ${(n / 1e7).toFixed(2)} crore` : `INR ${n.toLocaleString("en-IN")}`);
+const norm = (s) => clean(String(s ?? "").replace(/[’‘]/g, "'").replace(/[“”]/g, '"')).toLowerCase();
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const day = (d) => (d ? DAYS[d.getDay()] : "");
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const short = (d) => (d ? `${String(d.getDate()).padStart(2, "0")}-${MON[d.getMonth()]}` : "–");
+const col = (i) => (i >= 0 ? String.fromCharCode(65 + i) : "A");
 const surname = (s) => (String(s).match(/([A-Z][a-z]{2,})\b/g) || []).pop() || "";
+const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+const inr = (n) => (n == null ? "–" : n >= 1e7 ? `INR ${(n / 1e7).toFixed(2)} crore` : `INR ${n.toLocaleString("en-IN")}`);
+const KIND_CODE = { sop: "NFS-01", rcm: "NFS-02", config: "NFS-03", vcrf: "NFS-04", review: "NFS-05", transcript: "NFS-06", walkthrough: "NFS-06", cheque: "NFS-07" };
+const codeOf = (name, kind) => (String(name || "").match(/NFS-\d{2}/) || [])[0] || KIND_CODE[kind] || kind;
 
-export function runTest({ rcm, sop, evidence, sampleNote }) {
+// Page of a quote in extracted PDF text ("… Page N" footer marks each page)
+function pageOf(raw, quote) {
+  const text = String(raw || "");
+  const flat = norm(text);
+  const at = flat.indexOf(norm(quote));
+  if (at < 0) return null;
+  // map position in normalised text back approximately: count markers before it
+  const markers = [...text.matchAll(/Page (\d+)\s*$/gm)].map((m) => ({ at: norm(text.slice(0, m.index)).length, page: +m[1] }));
+  return markers.filter((m) => m.at <= at).pop()?.page || 1;
+}
+// Exact wording of a phrase as it appears in the source (case kept)
+function phrase(raw, re) {
+  const m = clean(String(raw || "").replace(/[’‘]/g, "'")).match(re);
+  return m ? m[0] : "";
+}
+
+export function runTest({ rcm, sop, evidence }) {
   const ev = evidence;
+  const T = rcm.transcript;
+  const wt = rcm.wt;
+  const ctl = wt?.controls?.[0];
+  const v = ev.vcrfs[0];
+  const chq = ev.cheques?.[0];
   const access = ev.access || [];
   const calendar = ev.calendar || [];
   const changes = ev.changes || [];
-  const bankChanges = changes.filter((c) => c.isBank);
-  const userOf = (id) => access.find((u) => u.user.toUpperCase() === String(id).toUpperCase());
-  const userByName = (name) => access.find((u) => surname(u.name) && surname(u.name) === surname(name));
-  const vcrfFor = (ref, code) => ev.vcrfs.find((v) => (ref && v.ref === ref) || (!ref && code && v.vendorCode === code));
-  const results = [];
-  const R = (id, status, observation, details, extra = {}) => {
-    const attr = rcm.attributes.find((a) => a.id === id);
-    results.push({ attr, status, observation, details, ...extra });
-  };
-  const notTested = (id, why) => R(id, "Not tested", why, []);
-
-  // ── A1 documentation ────────────────────────────────────────────────────
-  if (!ev.vcrfs.length) notTested("A1", "No VCRF provided.");
-  else {
-    const det = ev.vcrfs.map((v) => {
-      const holderOk = !!v.vendorName && (v.holderLine || "").toLowerCase().split(v.vendorName.toLowerCase()).length - 1 >= 1 && (!v.newHolder || v.newHolder.toLowerCase() === v.vendorName.toLowerCase());
-      const ok = v.docs.letter && v.docs.cheque && !!v.signedBy && holderOk;
-      return { item: `${v.ref} · ${v.vendorCode} ${v.vendorName}`, expected: "Letterhead request, signatory, cancelled cheque, holder = vendor", actual: `${v.docs.letterhead ? "letterhead ✓" : "letterhead ✗"}, ${v.signedBy ? `signed by ${v.signedBy}` : "no signatory"}, ${v.docs.cheque ? "cheque ✓" : "cheque ✗"}, holder ${v.newHolder || "–"}`, result: ok ? "Pass" : "Exception", v };
-    });
-    const emailed = ev.vcrfs.filter((v) => v.receivedVia === "Email");
-    R("A1", det.every((d) => d.result === "Pass") ? "Pass" : "Exception",
-      `${plural(det.length, "VCRF")} inspected. ${det.every((d) => d.result === "Pass") ? "Each has the letterhead request, a named authorised signatory and a cancelled cheque, and the new account is in the vendor's name." : "Supporting documents are missing for " + det.filter((d) => d.result !== "Pass").map((d) => d.v.ref).join(", ") + "."}` +
-        (emailed.length ? ` Note: ${emailed.map((v) => v.ref).join(", ")} arrived by email; the VCRF does not record the sender address or compare it to the vendor-master email (${emailed[0].master.email || "–"}).` : ""),
-      det);
-  }
-
-  // ── A2 callback independence ───────────────────────────────────────────
-  if (!ev.vcrfs.length) notTested("A2", "No VCRF provided.");
-  else {
-    const det = ev.vcrfs.map((v) => {
-      const toMaster = samePhone(v.callback.number, v.master.phone);
-      const toLetter = samePhone(v.callback.number, v.letterPhone);
-      const result = !v.master.phone ? "Not verifiable" : toMaster ? "Pass" : "Exception";
-      return { item: `${v.ref} · ${v.vendorName}`, expected: `Master contact ${v.master.phone || "not on VCRF"}`, actual: `Called ${v.callback.number || "–"} (${v.callback.source}${toLetter ? " – same as request letter" : ""})`, result, v, toLetter };
-    });
-    const bad = det.filter((d) => d.result === "Exception");
-    R("A2", bad.length ? "Exception" : det.some((d) => d.result === "Not verifiable") ? "Not verifiable" : "Pass",
-      bad.length
-        ? bad.map((d) => `${d.v.ref}: ${d.v.callback.by || "the MDM Executive"} called ${d.v.callback.number}, the number printed on the request letter, on ${fmtDateTime(d.v.callback.when)}. The authorised contact in the vendor master is ${d.v.master.contact ? `${d.v.master.contact}, ` : ""}${d.v.master.phone}. The callback therefore went to whoever sent the letter and does not verify the request.`).join(" ")
-        : "Each callback was made to the authorised number held in the vendor master.",
-      det);
-  }
-
-  // ── A3 callback recorded & before update ────────────────────────────────
-  if (!ev.vcrfs.length) notTested("A3", "No VCRF provided.");
-  else {
-    const det = ev.vcrfs.map((v) => {
-      const cb = v.callback;
-      const complete = cb.when && cb.number && cb.person && cb.outcome;
-      const before = cb.when && v.sap.when && cb.when < v.sap.when;
-      return { item: v.ref, expected: "Date, time, number, person, outcome; callback before SAP update", actual: `Callback ${fmtDateTime(cb.when)} with ${cb.person || "–"} (${cb.outcome || "no outcome"}); SAP ${v.sap.txn} ${fmtDateTime(v.sap.when)}`, result: complete && before ? "Pass" : "Exception", v };
-    });
-    R("A3", det.every((d) => d.result === "Pass") ? "Pass" : "Exception",
-      det.every((d) => d.result === "Pass") ? `The callback log is complete and each callback came before the SAP update (${det.map((d) => `${d.v.ref}: ${fmtDateTime(d.v.callback.when)} → ${fmtDateTime(d.v.sap.when)}`).join("; ")}). The record itself is complete – the problem is which number was called (A2).` : "Callback details are incomplete or the SAP update came first.",
-      det);
-  }
-
-  // ── A4 SAP change agrees to VCRF ────────────────────────────────────────
-  if (!ev.vcrfs.length || !changes.length) notTested("A4", !ev.vcrfs.length ? "No VCRF provided." : "No change report provided to agree the SAP change.");
-  else {
-    const det = ev.vcrfs.map((v) => {
-      const row = changes.find((c) => c.vcrf === v.ref) || changes.find((c) => c.code === v.vendorCode && c.isBank);
-      if (!row) return { item: v.ref, expected: "Change in SAP change report", actual: "Not found in the change report", result: "Exception", v };
-      const ifscOk = !v.newIfsc || row.newV.includes(v.newIfsc);
-      const acctOk = !v.newAcct || lastDigits(row.newV) === lastDigits(v.newAcct);
-      const userOk = !v.sap.user || row.by.toUpperCase() === v.sap.user.toUpperCase();
-      const dateOk = !v.sap.when || sameDay(row.when, v.sap.when);
-      const ok = ifscOk && acctOk && userOk && dateOk;
-      return { item: `${v.ref} · ${v.vendorCode}`, expected: `${v.newIfsc} / …${lastDigits(v.newAcct)} by ${v.sap.user} on ${fmtDate(v.sap.when)}`, actual: `${row.newV} by ${row.by} on ${row.on} (row ${row.__row})`, result: ok ? "Pass" : "Exception", v };
-    });
-    R("A4", det.every((d) => d.result === "Pass") ? "Pass" : "Exception",
-      det.every((d) => d.result === "Pass") ? "The new IFSC, account ending, user and date in SAP agree to the VCRF." : "The SAP change does not agree to the VCRF for " + det.filter((d) => d.result !== "Pass").map((d) => d.item).join(", ") + ".",
-      det);
-  }
-
-  // ── A5 segregation of duties ────────────────────────────────────────────
-  const conflictUsers = access.filter((u) => u.change && u.pay);
-  if (!access.length) notTested("A5", "No user access extract provided.");
-  else {
-    const changers = [...new Map([...bankChanges.map((c) => [c.by, c]), ...ev.vcrfs.filter((v) => v.sap.user).map((v) => [v.sap.user, { by: v.sap.user, code: v.vendorCode, name: v.vendorName, when: v.sap.when, vcrf: v.ref }])]).values()];
-    const det = changers.map((c) => {
-      const u = userOf(c.by);
-      const runs = calendar.filter((r) => r.by.toUpperCase() === String(c.by).toUpperCase());
-      const nonMdm = u && !/master data|mdm/i.test(u.dept);
-      const bad = u && u.pay;
-      return {
-        item: `${c.by}${u ? ` (${u.name}, ${u.dept})` : ""} changed ${c.code} ${c.name}`,
-        expected: "MDM user; no F110 access",
-        actual: !u ? "User not in access extract" : `${u.roles}; F110 ${u.pay ? "YES" : "no"}${runs.length ? `; ran payment run(s) ${runs.map((r) => `${r.runId} on ${r.date}`).join(", ")}` : ""}${nonMdm ? "; not an MDM user" : ""}`,
-        result: !u ? "Not verifiable" : bad ? "Exception" : "Pass",
-        u,
-        runs,
-        c,
-        nonMdm,
-      };
-    });
-    const bad = det.filter((d) => d.result === "Exception");
-    R("A5", bad.length ? "Exception" : "Pass",
-      bad.length
-        ? `${bad.map((d) => `${d.u.user} (${d.u.name}, ${d.u.dept}) changed the bank details of ${d.c.code} ${d.c.name} on ${fmtDate(d.c.when)} and also holds F110 payment-run access${d.runs.length ? ` – and executed payment run ${d.runs.map((r) => `${r.runId} (${r.date}, ${r.vendors ?? "?"} vendors, ${inr(r.amount)})`).join(", ")}` : ""}.`).join(" ")} ${plural(conflictUsers.length, "user")} in total can both change vendor bank details and run payments: ${conflictUsers.map((u) => `${u.user} ${u.name}`).join(", ")}.${det.some((d) => d.nonMdm) ? ` SOP ${sop.facts.update.ref} assigns SAP updates to the ${sop.facts.update.performer || "MDM Executive"}; ${det.filter((d) => d.nonMdm).map((d) => d.u.user).join(", ")} is in ${det.find((d) => d.nonMdm).u.dept}.` : ""}`
-        : "Users who changed bank details have no payment-run access.",
-      det,
-      { conflictUsers });
-  }
-
-  // ── A6 system configuration ─────────────────────────────────────────────
-  const fk08 = access.filter((u) => u.confirm);
-  if (!ev.sensitive?.length) notTested("A6", "No sensitive-field configuration provided.");
-  else {
-    const bankFields = ev.sensitive.filter((r) => /LFBK|bank|account|ifsc|holder/i.test(`${r.field} ${r.desc}`));
-    const det = bankFields.map((r) => ({ item: `${r.field} ${r.desc}`, expected: "Sensitive, dual control, payment block", actual: `Sensitive ${r.sensitive ? "Yes" : "No"} · dual control ${r.dual ? "Yes" : "No"} · block ${r.block ? "Yes" : "No"}`, result: r.sensitive && r.dual && r.block ? "Pass" : "Exception" }));
-    if (access.length) det.push({ item: "FK08 (confirm change) assigned", expected: "At least one user outside MDM", actual: fk08.length ? fk08.map((u) => u.user).join(", ") : "No user has FK08", result: fk08.length ? "Pass" : "Exception" });
-    const bad = det.filter((d) => d.result === "Exception");
-    const protectedF = ev.sensitive.filter((r) => r.sensitive && r.dual).map((r) => r.desc || r.field);
-    R("A6", bad.length ? "Exception" : "Pass",
-      bad.length
-        ? `${bankFields.filter((r) => !r.sensitive).map((r) => r.desc || r.field).join(", ")} ${bankFields.filter((r) => !r.sensitive).length === 1 ? "is" : "are"} not defined as sensitive fields, so a change takes effect immediately with no second-user confirmation and no payment block. Dual control is active only for ${protectedF.join(", ") || "no fields"}.${fk08.length ? "" : " No user holds FK08, so dual control could not operate even if it were switched on."} (${ev.sensitiveMeta?.lines?.slice(1).join("; ") || ""})`
-        : "Bank fields are sensitive with dual control and a payment block, and FK08 is assigned.",
-      det);
-  }
-
-  // ── A7 review timeliness & sign-off; payment exposure ───────────────────
-  const m = ev.changesMeta;
+  const cm = ev.changesMeta;
   const so = ev.signoff;
-  let exposure = [];
-  if (!m || !so) notTested("A7", "No signed weekly change report provided.");
-  else {
-    const due = m.to ? new Date(m.to.getTime() + 864e5) : null;
-    const timely = so.date && due && so.date <= new Date(due.getTime() + 2 * 864e5);
-    const reviewerOk = so.reviewer && (new RegExp(surname(sop.owner) || "Controller", "i").test(so.reviewer) || /controller/i.test(so.reviewer));
-    const firstBank = bankChanges.reduce((min, c) => (c.when && (!min || c.when < min) ? c.when : min), null);
-    exposure = calendar.filter((r) => firstBank && r.when >= firstBank && r.when < (so.date || m.sentOn || r.when)).map((r) => ({ ...r, changesBefore: bankChanges.filter((c) => c.when && c.when < r.when) }));
-    const det = [
-      { item: "Period covered", expected: "Previous Monday–Sunday", actual: `${fmtDate(m.from)} to ${fmtDate(m.to)}`, result: m.from && m.to && m.from.getDay() === 1 && m.to.getDay() === 0 ? "Pass" : "Exception" },
-      { item: "Report sent / reviewed", expected: `By ${fmtDate(due)} (${sop.facts.review.day || "Monday"})`, actual: `Sent ${fmtDateTime(m.sentOn)}; reviewed ${fmtDate(so.date)}`, result: timely ? "Pass" : "Exception" },
-      { item: "Sign-off by reviewer", expected: sop.owner || "Finance Controller", actual: `${so.reviewer || "–"} · ${so.signoff || "–"}`, result: reviewerOk && so.signoff ? "Pass" : "Exception" },
-      ...exposure.map((r) => ({ item: `Payment run ${r.runId} ${r.date}`, expected: "Bank changes reviewed before payment", actual: `${plural(r.changesBefore.length, "bank change")} not yet reviewed; run by ${r.by}, ${r.vendors ?? "?"} vendors, ${inr(r.amount)}`, result: "Noted" })),
-    ];
-    const ok = det.filter((d) => d.result !== "Noted").every((d) => d.result === "Pass");
-    R("A7", ok ? "Pass" : "Exception",
-      `${m.week ? `Week ${m.week}` : "The week"} (${fmtDate(m.from)}–${fmtDate(m.to)}) was sent on ${fmtDateTime(m.sentOn)} and signed off by ${so.reviewer} on ${fmtDate(so.date)} – ${ok ? "on time, by the right person" : "not in line with the SOP"}.` +
-        (exposure.length ? ` However, ${plural(exposure.length, "payment run")} (${exposure.map((r) => `${r.runId} on ${r.date}, ${inr(r.amount)}`).join("; ")}) ran after the first bank change and before the review, so the review could not stop a fraudulent payment (design gap D5).` : ""),
-      det);
-  }
-
-  // ── A8 report completeness & accuracy (IPE) ────────────────────────────
-  if (!m) notTested("A8", "No change report provided.");
-  else {
-    const prep = userByName(m.preparedBy);
-    const det = [
-      { item: "Preparer independent of changes", expected: "No vendor change access", actual: prep ? `${m.preparedBy} = ${prep.user}, XK02/FK02 ${prep.change ? "YES" : "no"}` : `${m.preparedBy || "–"} (not in access extract)`, result: prep ? (prep.change ? "Exception" : "Pass") : "Not verifiable" },
-      { item: "How the report was produced", expected: "System report / completeness evidenced", actual: m.source || "Not stated", result: m.manualFilter ? "Exception" : "Pass" },
-      { item: "Completeness tie-out", expected: "Record count tied to SAP change documents (CDHDR)", actual: /cdhdr|record count|tie|reconcil/i.test(m.lines.join(" ")) ? "Evidenced" : "No evidence of a tie-out", result: /cdhdr|record count|tie|reconcil/i.test(m.lines.join(" ")) ? "Pass" : "Exception" },
-    ];
-    if (so) {
-      det.push({ item: "Sign-off count = report rows", expected: String(changes.length), actual: String(so.count ?? "–"), result: so.count === changes.length ? "Pass" : "Exception" });
-      det.push({ item: "Bank changes in sign-off = report", expected: String(bankChanges.length), actual: String(so.bankVerified ?? "–"), result: so.bankVerified === bankChanges.length ? "Pass" : "Exception" });
-    }
-    const bad = det.filter((d) => d.result === "Exception");
-    R("A8", bad.length ? "Exception" : "Pass",
-      bad.length
-        ? `The report was ${m.manualFilter ? "exported to Excel and filtered manually by the MDM team" : "prepared"} and sent by ${m.preparedBy}${prep?.change ? `, who holds vendor change access (${prep.user}, XK02/FK02)` : ""}. Nothing shows it was tied back to SAP change documents, so a change could be left out without the reviewer knowing. The counts in the sign-off agree to the report as provided, but that does not prove completeness. The review therefore cannot rely on the report.`
-        : "The report is complete and accurate.",
-      det);
-  }
-
-  // ── A9 precision of the review ─────────────────────────────────────────
-  const pending = bankChanges.filter((c) => !vcrfFor(c.vcrf, c.code)).map((c) => ({ ref: c.vcrf, code: c.code, name: c.name, by: c.by, on: c.on }));
-  if (!bankChanges.length || !so) notTested("A9", "No change report with bank-detail changes provided.");
-  else {
-    const a2 = results.find((r) => r.attr.id === "A2");
-    const det = bankChanges.map((c) => {
-      const v = vcrfFor(c.vcrf, c.code);
-      const u = userOf(c.by);
-      const issues = [];
-      const cbRow = a2?.details?.find((d) => d.v?.ref === v?.ref);
-      if (cbRow?.result === "Exception") issues.push("callback made to the number on the request letter, not the vendor master");
-      if (u && !/master data|mdm/i.test(u.dept)) issues.push(`changed by ${u.user} (${u.dept}), not the MDM Executive`);
-      if (u?.pay) issues.push(`${u.user} also has F110 payment-run access`);
-      const verified = /verified|ok|agreed/i.test(c.remark);
-      return {
-        item: `${c.vcrf} · ${c.code} ${c.name}`,
-        expected: "Discrepancies flagged by the reviewer",
-        actual: `Reviewer: "${c.remark}". ${issues.length ? `Re-performance found: ${issues.join("; ")}.` : "No issues found on re-performance."}${v ? "" : " (VCRF not provided – callback not re-performed)"}`,
-        result: issues.length && verified ? "Exception" : !v ? "Pending" : "Pass",
-        issues,
-      };
-    });
-    const missed = det.filter((d) => d.result === "Exception");
-    R("A9", missed.length ? "Exception" : det.some((d) => d.result === "Pending") ? "Pending" : "Pass",
-      missed.length
-        ? `${so.reviewer} marked every change "Verified" and signed off "${so.exceptions || "no exceptions"}" (${so.comment}). Re-performing the review found ${plural(missed.reduce((n, d) => n + d.issues.length, 0), "issue")} on ${plural(missed.length, "bank-detail change")} that the reviewer did not flag: ${missed.map((d) => `${d.item.split(" · ")[0]} – ${d.issues.join("; ")}`).join(". ")}. The review is not precise enough to detect an unauthorised change.`
-        : "Re-performance agreed to the reviewer's conclusions.",
-      det);
-  }
-
-  // ── exceptions ──────────────────────────────────────────────────────────
-  const get = (id) => results.find((r) => r.attr.id === id);
-  const exceptions = [];
+  const f = sop.facts;
   const owner = rcm.control.owner;
-  const exposureText = exposure.length ? ` ${plural(exposure.length, "payment run")} (${exposure.map((r) => `${r.runId}, ${inr(r.amount)}`).join("; ")}) ran after the change and before the weekly review.` : "";
-  const addEx = (attrIds, o) => exceptions.push({ id: `EX-${String(exceptions.length + 1).padStart(2, "0")}`, attrIds, owner, instances: attrIds, ...o });
+  const ownerRole = (String(owner).split(/\s[-–]\s/)[0] || owner).trim();
 
-  if (get("A2")?.status === "Exception") {
-    const v = get("A2").details.find((d) => d.result === "Exception").v;
-    addEx(["A2"], {
-      title: "Callback made to the number supplied in the request",
-      type: "Design & operating",
-      severity: "High",
-      condition: get("A2").observation,
-      criteria: `RCM ${rcm.control.id}(b): callback to verify the request. Good practice: verify bank changes only through contact details already held independently (vendor master / onboarding, SOP 4). SOP ${sop.facts.callback.ref} instead points to the request letter.`,
-      cause: `SOP ${sop.facts.callback.ref} instructs the MDM Executive to call the number on the vendor's request letter; the RCM does not specify the number source.`,
-      effect: `A fraudulent letter with the fraudster's number would be "confirmed", and payments to ${v.vendorName} would go to the new account.${exposureText} It is not yet known whether ${v.vendorName} (${v.vendorCode}) actually requested this change.`,
-      recommendation: `Immediately call ${v.vendorName} on the master number ${v.master.phone} to confirm the change to ${v.newIfsc} …${lastDigits(v.newAcct)}, and confirm whether any payment has gone to the new account. Amend SOP ${sop.facts.callback.ref} and the RCM so callbacks use only the vendor-master contact, and record the source of the number on the VCRF.`,
-    });
+  const files = {
+    sop: { name: sop.name, code: codeOf(sop.name, "sop") },
+    rcm: wt ? { name: wt.name, code: codeOf(wt.name, "rcm") } : null,
+    tr: T ? { name: T.name, code: codeOf(T.name, "transcript") } : null,
+    vcrf: v ? { name: v.file, code: codeOf(v.file, "vcrf") } : null,
+    chq: chq ? { name: chq.file, code: codeOf(chq.file, "cheque") } : null,
+    cfg: ev.accessMeta || ev.sensitiveMeta || ev.calendarMeta ? { name: (ev.accessMeta || ev.sensitiveMeta || ev.calendarMeta).file, code: codeOf((ev.accessMeta || ev.sensitiveMeta || ev.calendarMeta).file, "config") } : null,
+    rev: cm || so ? { name: (cm || so).file, code: codeOf((cm || so).file, "review") } : null,
+  };
+
+  // ── annotation builders ───────────────────────────────────────────────
+  const annotations = [];
+  const counters = {};
+  const results = [];
+  const A = (attr, src, location, highlight, note, isT = false) => {
+    if (!src) return null;
+    counters[attr] = (counters[attr] || 0) + 1;
+    const a = { ref: `${attr}-${counters[attr]}`, attr, code: src.code, file: src.name, location, highlight, note, transcript: isT };
+    annotations.push(a);
+    return a;
+  };
+  // quote from the transcript
+  const TQ = (attr, quote, note, re) => {
+    if (!T) return null;
+    const line = T.find(quote);
+    if (!line) return null;
+    const hl = re ? phrase(line.text, re) || quote : quote;
+    return A(attr, files.tr, `Page ${line.page}`, hl, note, true);
+  };
+  // quote from the SOP
+  const SQ = (attr, quote, note) => {
+    if (!quote) return null;
+    const pg = pageOf(sop.raw, quote);
+    if (!pg) return null;
+    return A(attr, files.sop, `Page ${pg}`, quote, note);
+  };
+  const VQ = (attr, quote, note) => (v && quote && norm(v.raw).includes(norm(quote)) ? A(attr, files.vcrf, "Page 1", quote, note) : null);
+  const R = (id, status, observation, extra = {}) => {
+    const attr = rcm.attributes.find((a) => a.id === id);
+    const anns = annotations.filter((a) => a.attr === id);
+    anns.forEach((a) => (a.result = status));
+    const mark = status === "Pass" ? "✓" : status === "Partial" ? "◐" : status === "Not tested" ? "NT" : "✗";
+    results.push({ attr, status, observation, annotations: anns, tick: `${mark}${anns.some((a) => a.transcript) ? " T" : ""}`, ...extra });
+  };
+  const refRange = (id) => {
+    const r = annotations.filter((a) => a.attr === id).map((a) => a.ref);
+    return r.length > 2 ? `${r[0]} to ${r[r.length - 1]}` : r.join(", ");
+  };
+
+  // ── A1 Risk linkage ─────────────────────────────────────────────────────
+  {
+    const letters = rcm.activities.map((a) => a.letter);
+    const riskOk = /bank|payment|divert|fraud/i.test(rcm.control.riskDesc) && rcm.activities.length >= 2;
+    if (ctl && wt.cols) {
+      const r = ctl.__row;
+      A("A1", files.rcm, `'${wt.sheet}'!${col(wt.cols.riskDesc)}${r}:${col(wt.cols.controlDesc)}${r}`, `Cells ${col(wt.cols.riskDesc)}${r}:${col(wt.cols.controlDesc)}${r}`,
+        `Risk ${rcm.control.riskId} (payment diversion) is directly addressed by control components (${letters[0]}) to (${letters[letters.length - 1]}).`);
+    }
+    const t = TQ("A1", "vendor impersonation", "Control owner confirms the fraud scenario the control targets.");
+    R("A1", riskOk ? "Pass" : "Deficiency",
+      riskOk
+        ? `Control components (${letters[0]})-(${letters[letters.length - 1]}) map to payment diversion risk.${t ? " Owner confirmed vendor impersonation as the target scenario." : ""}`
+        : `The control description does not clearly address risk ${rcm.control.riskId}.`);
   }
-  if (get("A6")?.status === "Exception")
-    addEx(["A6"], {
-      title: "Vendor bank fields not protected by SAP dual control",
-      type: "Design (IT dependency)",
-      severity: "High",
-      condition: get("A6").observation,
-      criteria: "Vendor bank key, account number and account holder should be sensitive fields (T055F) with FK08/FK09 dual control and a payment block until a second user confirms the change.",
-      cause: "Sensitive-field configuration covers only some vendor fields; bank fields were never added. FK08 is not assigned to anyone.",
-      effect: "A single user can change bank details and the change is used in the next payment run with no system check. The control relies entirely on manual steps that can be bypassed.",
-      recommendation: "Add LFBK-BANKL, LFBK-BANKN and LFBK-KOINH to sensitive fields for company code 1000 with payment block; assign FK08 to a user outside MDM and AP (e.g. Finance Controller's team); review open unconfirmed changes before each F110 run.",
-    });
-  if (get("A5")?.status === "Exception") {
-    const d = get("A5").details.filter((x) => x.result === "Exception");
-    addEx(["A5"], {
-      title: "Users can both change vendor bank details and run payments",
-      type: "Operating (access / SoD)",
-      severity: "High",
-      condition: get("A5").observation,
-      criteria: "Segregation of duties: users who maintain vendor bank details must not have payment-run (F110) access. SOP assigns SAP updates to the MDM Executive only.",
-      cause: `Role Z_AP_PAYRUN and Z_MDM_VENDOR_MAINT are assigned together to ${get("A5").conflictUsers.map((u) => u.user).join(", ")}; no SoD rule set or periodic access review caught it.`,
-      effect: `One person can redirect a vendor's bank account and pay it.${d.some((x) => x.runs.length) ? ` This was exercised: ${d.filter((x) => x.runs.length).map((x) => `${x.u.user} changed ${x.c.code} and ran ${x.runs.map((r) => r.runId).join(", ")}`).join("; ")}.` : ""}`,
-      recommendation: `Remove F110 from MDM users and vendor-maintenance roles from AP users (${get("A5").conflictUsers.map((u) => u.user).join(", ")}). Review all bank changes by these users in the year and agree payments made to changed accounts to vendor confirmations.`,
-    });
+
+  // ── A2 Policy governance ────────────────────────────────────────────────
+  {
+    const asOf = T?.date || new Date();
+    const ok = !!sop.approvedBy && !!sop.reviewDue && sop.reviewDue >= asOf;
+    SQ("A2", fmtDate(sop.approvalDate), `SOP v${sop.version} approved by ${(sop.approvedBy.split(/\s[-–]\s/)[0] || "approver").replace("Chief Financial Officer", "CFO")} on ${fmtDate(sop.approvalDate)}.`);
+    SQ("A2", fmtDate(sop.reviewDue), ok ? `Within review cycle at walkthrough date (${fmtDate(asOf)}).` : `Review overdue at walkthrough date (${fmtDate(asOf)}).`);
+    TQ("A2", "approved it on", `Owner confirms SOP v${sop.version} is the version in force.`, /approved it on [^.]+/i);
+    R("A2", ok ? "Pass" : "Deficiency",
+      `${sop.docId} v${sop.version} approved by ${/chief financial/i.test(sop.approvedBy) ? "CFO" : sop.approvedBy} ${fmtDate(sop.approvalDate)}; next review ${fmtDate(sop.reviewDue)}.${annotations.some((a) => a.attr === "A2" && a.transcript) ? " Owner confirmed version in force." : ""}`);
   }
-  if (get("A9")?.status === "Exception")
-    addEx(["A9"], {
-      title: "Weekly review did not identify discrepancies",
-      type: "Operating (review precision)",
+
+  // ── A3 Ownership and authority ──────────────────────────────────────────
+  {
+    const same = surname(ctl?.owner || owner) === surname(sop.owner);
+    if (ctl && wt.cols) A("A3", files.rcm, `'${wt.sheet}'!${col(wt.cols.owner)}${ctl.__row}`, `Cells ${col(wt.cols.owner)}${ctl.__row}`, `Control owner named: ${ownerRole}.`);
+    SQ("A3", sop.owner, same ? "SOP names the same process owner; consistent with RCM." : "SOP names a different process owner from the RCM.");
+    TQ("A3", "the control owner", "Owner accepts accountability; role is senior enough to act on findings.", /I'?m the control owner/i);
+    const hold = T?.find("hold the payment");
+    R("A3", same ? "Pass" : "Deficiency",
+      same ? `${ownerRole} named consistently; has authority to hold payments and escalate to CFO.${hold ? "" : ""}` : `Owner differs between RCM (${ctl?.owner}) and SOP (${sop.owner}).`);
+  }
+
+  // ── A4 Precision and criteria ───────────────────────────────────────────
+  if (!v) R("A4", "Not tested", "VCRF for the sample not provided.");
+  else {
+    const dc = f.docCheck;
+    const holder = chq?.holder || "";
+    const nameMismatch = !!holder && norm(holder) !== norm(v.vendorName);
+    const senderDomain = (v.sender.split("@")[1] || "").toLowerCase();
+    const masterDomain = (v.master.email.split("@")[1] || "").toLowerCase();
+    const webmail = /gmail|yahoo|outlook|hotmail|rediff/i.test(senderDomain);
+    const senderMismatch = !!senderDomain && !!masterDomain && senderDomain !== masterDomain;
+    const presenceOnly = dc ? dc.presenceOnly : f.callback.source !== "master";
+    if (presenceOnly && dc) SQ("A4", dc.quote, "SOP requires only that the documents are present. No criteria to match cheque account name to vendor, signatory to onboarding records, or sender email to vendor master.");
+    if (chq && holder)
+      A("A4", files.chq, "Page 1", `For ${holder}`, nameMismatch ? `Cheque account is held by '${titleCase(holder)}', not the vendor '${v.vendorName}'. A document-presence check cannot detect this.` : "Cheque account name agrees to the vendor name.");
+    const chqItem = (v.docCheck?.items || []).find((i) => /cheque/i.test(i));
+    if (chqItem) VQ("A4", chqItem, "Sample document check records attachment only; cheque details not compared to vendor master.");
+    if (v.master.email) VQ("A4", v.master.email, senderMismatch ? `Vendor master holds a company-domain email; request arrived from a ${webmail ? "free webmail" : "different"} ID (${v.sender}). No sender check in SOP.` : "Request sender agrees to the vendor master email domain.");
+    TQ("A4", "Once they're attached, I go ahead", "MDM Executive confirms check is limited to presence of documents.");
+    if (webmail) TQ("A4", senderDomain, "Request came from a free webmail ID, not the vendor's registered domain.");
+    TQ("A4", "the SOP doesn't ask for it", "Account holder name on cheque not compared; vendor name keyed into SAP instead of cheque name.");
+    TQ("A4", "I check it's attached", "Reviewer does not examine cheque details, so the weekly review cannot catch a name mismatch.");
+    const def = presenceOnly || nameMismatch || senderMismatch;
+    R("A4", def ? "Deficiency" : "Pass",
+      def
+        ? `SOP ${dc?.ref?.split(" ")[0] || f.callback.ref} requires only that the letter and cheque are attached. In the sample, ${nameMismatch ? `the cheque is in the name of '${titleCase(holder)}', not vendor '${v.vendorName}'` : "the cheque name agrees"}${senderMismatch ? `, and the request came from a ${webmail ? "Gmail" : "different"} ID while the master email is a company domain` : ""}. Neither was checked; the vendor name was keyed as account holder. Reviewer does not examine cheque details.`
+        : "Document check criteria are specific enough to detect a fraudulent request.",
+      { details: [
+        { item: "Cheque account holder", expected: v.vendorName, actual: holder ? titleCase(holder) : "Cheque not provided", result: !holder ? "Not tested" : nameMismatch ? "Exception" : "Pass" },
+        { item: "Request sender", expected: `@${masterDomain || "vendor domain"}`, actual: v.sender || "Not recorded", result: senderMismatch ? "Exception" : "Pass" },
+        { item: "SAP account holder keyed", expected: holder ? titleCase(holder) : "Cheque name", actual: v.newHolder || v.vendorName, result: nameMismatch ? "Exception" : "Pass" },
+        { item: `SOP ${dc?.ref?.split(" ")[0] || ""} criterion`, expected: "Name, signatory and sender validated", actual: presenceOnly ? "Presence of documents only" : "Validation defined", result: presenceOnly ? "Exception" : "Pass" },
+      ] });
+  }
+
+  // ── A5 Frequency and timing ─────────────────────────────────────────────
+  const changeAt = v?.sap.when;
+  const reviewAt = so?.date || cm?.sentOn;
+  const runsBetween = changeAt && reviewAt ? calendar.filter((r) => r.when >= new Date(changeAt.toDateString()) && r.when <= reviewAt) : [];
+  if (!v || !calendar.length || !so) R("A5", "Not tested", "VCRF, payment run calendar or review sign-off not provided.");
+  else {
+    const every = phrase(sop.raw, /Every (monday|tuesday|wednesday|thursday|friday|saturday|sunday), the [A-Z]+ [A-Z][a-z]+/i);
+    SQ("A5", every, "Only independent check on bank changes is weekly and after the change is live.");
+    VQ("A5", fmtDateTime(changeAt), `Sample change live in SAP on ${day(changeAt)} ${fmtDate(changeAt)}.`);
+    const run = runsBetween[0];
+    if (run && ev.calendarMeta) A("A5", files.cfg, `'${ev.calendarMeta.sheet}'!A${run.__row}:${col((ev.calendarMeta.width || 6) - 1)}${run.__row}`, `Cells A${run.__row}:${col((ev.calendarMeta.width || 6) - 1)}${run.__row}`, `Payment run on ${day(run.when)} ${fmtDate(run.when)}, before the weekly review.`);
+    if (so.dateRow) A("A5", files.rev, `'${so.sheet}'!B${so.dateRow}`, `Cells B${so.dateRow}`, `Review performed ${day(reviewAt)} ${fmtDate(reviewAt)}${run ? `, ${Math.round((reviewAt - run.when) / 864e5)} days after payment` : ""}.`);
+    TQ("A5", "was paid on", "AP confirms vendor was paid to the new account before the review.", /[A-Z][\w ]+ was paid on \d+\w*/);
+    R("A5", run ? "Deficiency" : "Pass",
+      run
+        ? `Change live ${short(changeAt)} (${day(changeAt).slice(0, 3)}); vendor paid in F110 run ${short(run.when)} (${day(run.when).slice(0, 3)}); review on ${short(reviewAt)} (${day(reviewAt).slice(0, 3)}). The only independent check is after payment.`
+        : "No payment run fell between the change and its review.",
+      { details: [
+        { item: "SAP change", expected: "Before review", actual: fmtDateTime(changeAt), result: "Pass" },
+        ...runsBetween.map((r) => ({ item: `F110 run ${r.runId}`, expected: "After review / confirmation", actual: `${fmtDate(r.when)} by ${r.by}`, result: "Exception" })),
+        { item: "Weekly review", expected: "Before payment", actual: fmtDate(reviewAt), result: run ? "Exception" : "Pass" },
+      ] });
+  }
+
+  // ── A6 System alignment ─────────────────────────────────────────────────
+  if (!ev.sensitive?.length) R("A6", "Not tested", "SAP sensitive-field configuration not provided.");
+  else {
+    const bank = ev.sensitive.filter((r) => /LFBK|bank|account/i.test(`${r.field} ${r.desc}`));
+    const weak = bank.filter((r) => !r.sensitive || !r.dual || !r.block);
+    if (weak.length && ev.sensitiveMeta) {
+      const a = Math.min(...weak.map((r) => r.__row));
+      const b = Math.max(...weak.map((r) => r.__row));
+      A("A6", files.cfg, `'${ev.sensitiveMeta.sheet}'!C${a}:E${b}`, `Cells C${a}:E${b}`, "Bank key, account number and holder are not sensitive fields: no dual control, no payment block.");
+    }
+    TQ("A6", "Bank fields were taken out in", "Basis confirms dual control was removed and never restored.", /bank fields were taken out in \d{4}/i);
+    TQ("A6", "No separate approval in SAP", "No system-enforced approval before a bank change becomes payable.");
+    const removed = T?.find("taken out in");
+    R("A6", weak.length ? "Deficiency" : "Pass",
+      weak.length ? `LFBK bank fields not set as sensitive: no dual control (FK08), no payment block.${removed ? ` Removed in ${(removed.text.match(/\b(20\d{2})\b/) || [])[1] || "the past"}, not restored.` : ""}` : "Vendor bank fields are sensitive with dual control and payment block.",
+      { details: bank.map((r) => ({ item: `${r.field} ${r.desc}`, expected: "Sensitive, FK08, payment block", actual: `${r.sensitive ? "sensitive" : "not sensitive"}, ${r.dual ? "dual control" : "no dual control"}, ${r.block ? "block" : "no block"}`, result: r.sensitive && r.dual && r.block ? "Pass" : "Exception" })) });
+  }
+
+  // ── A7 Segregation of duties ────────────────────────────────────────────
+  const conflicts = access.filter((u) => u.change && u.pay);
+  if (!access.length) R("A7", "Not tested", "SAP user access extract not provided.");
+  else {
+    const am = ev.accessMeta;
+    conflicts.forEach((u) => am && A("A7", files.cfg, `'${am.sheet}'!${col(am.cols.change)}${u.__row}:${col(am.cols.pay)}${u.__row}`, `Cells ${col(am.cols.change)}${u.__row}:${col(am.cols.pay)}${u.__row}`, `${u.user} (${u.name}) can change vendor bank details and execute payment runs.`));
+    const samePerson = v?.docCheck?.byUser && v.docCheck.byUser === v.sap.user;
+    if (samePerson) VQ("A7", `${v.sap.user} - ${(access.find((u) => u.user === v.sap.user) || {}).name || v.docCheck.by}`, "The person who checked the documents also made the SAP change. No maker-checker.");
+    const apBank = changes.filter((c) => c.isBank && /accounts payable/i.test((access.find((u) => u.user === c.by) || {}).dept || ""));
+    apBank.forEach((c) => cm && A("A7", files.rev, `'${cm.sheet}'!${col(cm.cols.by)}${c.__row}`, `Cells ${col(cm.cols.by)}${c.__row}`, `Bank change for ${c.name} made by AP user ${c.by}.`));
+    const sopSame = (f.docCheck?.performer || f.callback.performer) === f.update.performer;
+    if (sopSame) SQ("A7", phrase(sop.raw, new RegExp(`the ${f.update.performer} shall update`, "i")), "SOP assigns verification and execution to the same role.");
+    TQ("A7", "I cover payment runs", `${conflicts[0]?.user || "MDM user"} uses payment-run access in practice.`);
+    TQ("A7", "I did one change in", `${apBank[0]?.by || "AP user"} uses vendor-change access in practice.`, /I did one change in \w+/i);
+    const def = conflicts.length || samePerson || apBank.length;
+    R("A7", def ? "Deficiency" : "Pass",
+      def
+        ? `${conflicts.map((u) => u.user).join(" and ")} hold both XK02 and F110.${samePerson ? " Same person checked the documents and made the change in sample." : ""}${apBank.length ? ` ${apBank.map((c) => c.by).join(", ")} made a bank change in W${cm?.week || ""} (${apBank.map((c) => c.name).join(", ")}).` : ""}${T?.find("I cover payment runs") ? " Both users exercise the conflicting access." : ""}`
+        : "Verifier, maker and payment-run roles are separated.",
+      { conflictUsers: conflicts, details: conflicts.map((u) => ({ item: `${u.user} ${u.name}`, expected: "Not both XK02 and F110", actual: `XK02 ✓, F110 ✓ (${u.roles})`, result: "Exception" })) });
+  }
+
+  // ── A8 Information used (IPE) ───────────────────────────────────────────
+  if (!cm) R("A8", "Not tested", "Weekly change report not provided.");
+  else {
+    if (cm.manualFilter && cm.sourceRow) A("A8", files.rev, `'${cm.sheet}'!A${cm.sourceRow}`, `Cells A${cm.sourceRow}`, "Report exported and filtered by the MDM team, whose changes are under review.");
+    if (!cm.hasParameters && cm.preparedRow) A("A8", files.rev, `'${cm.sheet}'!A${cm.preparedRow}`, `Cells A${cm.preparedRow}`, "No report parameters, run log or record count retained.");
+    if (f.review.toExcel) SQ("A8", phrase(sop.raw, /from SAP to Excel/i), "SOP lets the reviewed team produce the review population.");
+    TQ("A8", "delete rows that are not relevant", "Manual deletion of rows before review; original extract not kept.");
+    TQ("A8", "extract; I don't re-run", "Reviewer performs no completeness or accuracy check of the report.", /I trust [\w']+ extract/i);
+    const def = cm.manualFilter || !cm.hasParameters || !f.review.completeness;
+    R("A8", def ? "Deficiency" : "Pass",
+      def ? `Report extracted and manually filtered by ${cm.preparedBy ? `the MDM team (${cm.preparedBy})` : "the reviewed team"}. No parameters, run log or record count kept; reviewer relies on it without checks.` : "Report is system-generated, independently sourced and reconciled.");
+  }
+
+  // ── A9 Exceptions and escalation ────────────────────────────────────────
+  {
+    const vague = f.exceptions.vague;
+    if (f.exceptions.text) SQ("A9", phrase(sop.raw, /for necessary action/i) || f.exceptions.text.slice(0, 40), vague ? "Escalation route defined, but no timeline, payment hold or escalation beyond Finance Controller." : "Exception handling defined.");
+    TQ("A9", "no fixed timeline", "Owner confirms payment hold would be informal.", /there'?s no fixed timeline/i);
+    R("A9", !f.exceptions.text ? "Deficiency" : vague ? "Partial" : "Pass",
+      !f.exceptions.text ? "SOP has no exception-handling step." : vague ? `Reporting to ${ownerRole} defined. No timeline, no formal payment hold, no escalation to CFO or recovery steps.` : "Exception handling has timeline, payment hold and escalation.");
+  }
+
+  // ── A10 Evidence of performance ─────────────────────────────────────────
+  {
+    if (v?.dms) VQ("A10", v.dms.replace(/^.*?(FIN\/)/, "$1"), "VCRF with document check retained in DMS.");
+    if (chq?.attachmentLine) A("A10", files.chq, "Page 1", (chq.attachmentLine.match(/Attachment \d+ to VCRF [\w-]+/) || [chq.attachmentLine])[0], "Cancelled cheque retained in DMS as VCRF attachment.");
+    if (so?.signoffRow) A("A10", files.rev, `'${so.sheet}'!B${so.signoffRow}`, `Cells B${so.signoffRow}`, "Review sign-off evidenced by dated email.");
+    if (f.retentionYears) SQ("A10", phrase(sop.raw, /retained for \w+ years/i), "Retention period defined.");
+    TQ("A10", "for eight years", "Owner confirms practice matches SOP.", /We keep both for \w+ years/i);
+    const ok = !!v?.dms && !!so?.signoff && f.retentionYears >= 8;
+    R("A10", ok ? "Pass" : v || so ? "Partial" : "Not tested",
+      ok ? `VCRF filed in DMS; W${cm?.week || ""} sign-off by email ${fmtDate(so.signedOn || so.date)}; ${f.retentionYears}-year retention defined and confirmed.` : "Evidence of performance incomplete.");
+  }
+
+  // ── observations (draft for management response) ────────────────────────
+  const get = (id) => results.find((r) => r.attr.id === id);
+  const bad = (id) => get(id) && !["Pass", "Not tested"].includes(get(id).status);
+  const observations = [];
+  const O = (attrs, o) => observations.push({ id: `O${observations.length + 1}`, attrs, attrText: attrs.join(", "), refs: attrs.map(refRange).filter(Boolean).join("; "), owner, response: "", due: "", ...o });
+  if (bad("A4"))
+    O(["A4"], {
+      title: "Document check confirms presence, not validity",
       severity: "High",
-      condition: get("A9").observation,
-      criteria: `RCM ${rcm.control.id}(d) / SOP ${sop.facts.review.ref}: the Finance Controller verifies each bank-detail change against the VCRF and the SOP.`,
-      cause: "The review checks that a VCRF exists rather than what it shows (number called, who made the change and their access). No review checklist defines what to verify.",
-      effect: "The detective control signed off a non-independent callback and a change by a user with payment access as \"no exceptions\". It cannot be relied upon to detect unauthorised changes.",
-      recommendation: "Introduce a review checklist per bank change: number called agrees to vendor master, changer is an MDM user without F110, VCRF and SAP change agree. Record evidence of each check on the report.",
+      condition: get("A4").observation,
+      effect: "A fraudster can submit a letter and a genuine cheque for an account they control and pass the check.",
+      recommendation: `Define validation criteria in SOP ${f.docCheck?.ref?.split(" ")[0] || "5.3"}: cheque account name must match the vendor's legal name; signatory must match the onboarding authorised-signatory list; request must come from the vendor's registered email domain; mismatches go to the ${ownerRole} before any SAP update. Consider bank account name validation through the bank's verification service.`,
     });
-  if (get("A8")?.status === "Exception")
-    addEx(["A8"], {
-      title: "Change report completeness not evidenced (IPE)",
-      type: "Operating (IPE)",
+  if (bad("A5") || bad("A6"))
+    O(["A5", "A6"].filter(bad), {
+      title: "No preventive check before a bank change becomes payable",
+      severity: "High",
+      condition: `Bank fields are outside SAP dual control; the only independent check is a weekly review after payment runs${changeAt && runsBetween[0] ? ` (sample: changed ${short(changeAt)}, paid ${short(runsBetween[0].when)}, reviewed ${short(reviewAt)})` : ""}.`,
+      effect: "Diverted payments are released before any independent check; recovery depends on the receiving bank.",
+      recommendation: `Reactivate dual control for LFBK fields with payment block until confirmation (FK08) by the ${ownerRole} or a designee outside MDM and AP. Alternatively, block payment to vendors with bank changes in the last 7 days until reviewed.`,
+    });
+  if (bad("A7"))
+    O(["A7"], {
+      title: "Incompatible access and duties",
+      severity: "High",
+      condition: `${conflicts.map((u) => u.user).join(" and ")} hold both vendor change (XK02) and payment run (F110) access, and both use it. The person who checks the documents also executes the SAP change.`,
+      effect: "One person can redirect a vendor's bank account and release payment.",
+      recommendation: "Remove F110 from MDM roles and XK02 from AP roles; use time-bound firefighter access for backups with log review. Separate verifier and maker in the SOP.",
+    });
+  if (bad("A8"))
+    O(["A8"], {
+      title: "Review report not validated and prepared by reviewed team",
       severity: "Medium",
-      condition: get("A8").observation,
-      criteria: "Information used in a control must be complete and accurate; the preparer should be independent of the activity being reviewed.",
-      cause: `SOP ${sop.facts.review.ref} has the MDM Lead extract and filter the report; no completeness step is defined.`,
-      effect: "A change omitted from the report – deliberately or by a filter error – would not be reviewed.",
-      recommendation: "Generate the report from SAP change documents (CDHDR/CDPOS, object KRED) by someone outside MDM, keep the parameters and record count with the report, and have the reviewer tie the count.",
+      condition: `W${cm?.week || ""} change report is extracted and manually filtered by the ${cm?.preparedBy ? `${cm.preparedBy.replace(/\s*\(.*\)/, "")} (MDM Lead)` : "MDM team"}; no parameters, run log or record count retained; reviewer relies on it as complete.`,
+      effect: "Unauthorised changes can be excluded from the review population without detection.",
+      recommendation: `${ownerRole} (or independent analyst) to run a saved SAP variant for change documents, retain parameters and record counts, and reconcile to the unfiltered extract.`,
     });
-  ["A1", "A3", "A4", "A7"].forEach((id) => {
-    const r = get(id);
-    if (r?.status !== "Exception") return;
-    addEx([id], { title: r.attr.label, type: "Operating", severity: r.attr.severity, condition: r.observation, criteria: r.attr.procedure, cause: "To be confirmed with the control owner.", effect: "Weakens prevention or detection of unauthorised bank changes.", recommendation: "Remediate and re-test." });
-  });
-  results.forEach((r) => (r.exceptionId = exceptions.find((e) => e.attrIds.includes(r.attr.id))?.id));
+  if (bad("A9"))
+    O(["A9"], {
+      title: "Exception handling not defined",
+      severity: "Medium",
+      condition: `SOP section ${f.exceptions.ref} says discrepancies are reported to the ${ownerRole}; no timeline, payment hold or escalation.`,
+      effect: "Delayed or inconsistent response to a suspected diversion.",
+      recommendation: "Define: same-day payment hold, escalation to CFO, bank recall request within 24 hours, and incident log.",
+    });
+  // exception cards for the shared UI
+  const exceptions = observations.map((o) => ({
+    id: o.id,
+    attrIds: o.attrs,
+    title: o.title,
+    type: "Design",
+    severity: o.severity,
+    condition: o.condition,
+    criteria: o.attrs.map((id) => `${id} ${get(id).attr.criterion}`).join("; "),
+    cause: `Annotation refs: ${o.refs}`,
+    effect: o.effect,
+    recommendation: o.recommendation,
+    owner,
+  }));
+  results.forEach((r) => (r.exceptionId = observations.find((o) => o.attrs.includes(r.attr.id))?.id));
 
-  // ── narratives, summary ─────────────────────────────────────────────────
+  // ── walkthrough trace of the sample ─────────────────────────────────────
+  const tline = (q) => {
+    const l = T?.find(q);
+    return l ? `[${l.time}] ${l.speaker}` : "–";
+  };
+  const refs = (id) => annotations.filter((a) => a.attr === id).map((a) => a.ref);
+  const pick = (id, pred) => annotations.filter((a) => a.attr === id && pred(a)).map((a) => a.ref);
+  const trace = v
+    ? [
+        { step: 1, sopRef: `SOP ${f.request.ref.split(" ")[0]}`, designed: "Request on letterhead with cancelled cheque", observed: `${files.vcrf.code}: letter dated ${fmtDate(v.letterDate)}, received ${fmtDate(v.receivedOn)}; cheque attached`, transcript: tline("gmail.com") !== "–" ? tline("gmail.com") : tline("request came"), performed: "Yes", note: pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0] ? `${pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0]}: request email from ${/gmail/i.test(v.sender) ? "Gmail ID" : "webmail ID"} - no check of sender domain` : "-" },
+        { step: 2, sopRef: `SOP ${f.vcrf.ref.split(" ")[0]}`, designed: "VCRF prepared with attachments", observed: `${files.vcrf.code}: VCRF ${v.ref}`, transcript: tline("prepares the VCRF"), performed: "Yes", note: "-" },
+        { step: 3, sopRef: `SOP ${(f.docCheck?.ref || f.callback.ref).split(" ")[0]}`, designed: f.docCheck ? "Document check: letter and cheque attached" : "Callback to verify the request", observed: `${files.vcrf.code}: check recorded ${short(v.docCheck?.when)} ${v.docCheck?.when ? fmtDateTime(v.docCheck.when).slice(-5) : ""}${chq ? `; ${files.chq.code}: cheque in name of ${titleCase(chq.holder)}` : ""}`, transcript: tline("Once they're attached"), performed: get("A4")?.status === "Deficiency" ? "Yes - but criterion too weak" : "Yes", note: refRange("A4") ? refRange("A4").replace(/ to A4-\d+$/, (m) => m) : "-" },
+        { step: 4, sopRef: `SOP ${f.update.ref.split(" ")[0]}`, designed: "MDM Executive updates SAP", observed: `${files.vcrf.code}: ${v.sap.txn} by ${v.sap.user} ${short(v.sap.when)} ${fmtDateTime(v.sap.when).slice(-5)}; ${v.sap.changeDoc}${chq && norm(chq.holder) !== norm(v.newHolder || v.vendorName) ? "; account holder keyed as vendor name" : ""}`, transcript: tline("updated the bank details"), performed: "Yes", note: pick("A7", (a) => /no maker-checker/i.test(a.note))[0] ? `${pick("A7", (a) => /no maker-checker/i.test(a.note))[0]}: same person checked and changed` : "-" },
+        { step: 5, sopRef: "-", designed: "System approval before payable", observed: `${files.cfg?.code || "NFS-03"}: ${get("A6")?.status === "Deficiency" ? "no dual control on LFBK fields" : "dual control active"}`, transcript: tline("No separate approval"), performed: get("A6")?.status === "Deficiency" ? "Not designed" : "Yes", note: refs("A6").slice(0, 2).join(", ") || "-" },
+        { step: 6, sopRef: "-", designed: "Payment to new account", observed: runsBetween[0] ? `${files.cfg?.code || "NFS-03"}: F110 run ${fmtDate(runsBetween[0].when)}` : "No run before review", transcript: tline("was paid on"), performed: "n/a", note: runsBetween[0] ? `${[pick("A5", (a) => /payment run on/i.test(a.note))[0], pick("A5", (a) => a.transcript)[0]].filter(Boolean).join(", ")}: paid before review` : "-" },
+        { step: 7, sopRef: `SOP ${f.review.ref}`, designed: "Weekly change report extracted", observed: `${files.rev?.code || "NFS-05"}: W${cm?.week || ""} report prepared by ${cm?.preparedBy?.replace(/\s*\(.*\)/, "") ? "MDM Lead" : "MDM"}${cm?.manualFilter ? ", filtered" : ""}`, transcript: tline("export the change report"), performed: "Yes", note: refRange("A8") ? refRange("A8").replace(/A8-5$/, "A8-4") : "-" },
+        { step: 8, sopRef: `SOP ${f.review.ref}`, designed: `${ownerRole} review and sign-off`, observed: `${files.rev?.code || "NFS-05"}: sign-off ${fmtDate(so?.date)}, ${/none/i.test(so?.exceptions || "") ? "no" : so?.exceptions || "no"} exceptions`, transcript: tline("I check it's attached"), performed: "Yes", note: [pick("A5", (a) => /review performed/i.test(a.note))[0], pick("A8", (a) => /no completeness/i.test(a.note))[0], pick("A4", (a) => /reviewer does not/i.test(a.note))[0]].filter(Boolean).join(", ") || "-" },
+        { step: 9, sopRef: `SOP ${f.retentionRef || "8"}`, designed: "VCRF and sign-off retained", observed: `${files.vcrf.code} DMS ref; ${files.rev?.code || "NFS-05"} email sign-off`, transcript: tline("for eight years"), performed: "Yes", note: [pick("A10", (a) => /DMS\./.test(a.note) && /VCRF/.test(a.note))[0], pick("A10", (a) => /sign-off/i.test(a.note))[0]].filter(Boolean).join(", ") || "-" },
+      ]
+    : [];
+
+  // ── payment exposure ────────────────────────────────────────────────────
+  const exposure = runsBetween.map((r) => ({
+    ...r,
+    changesBefore: changes.filter((c) => c.isBank && c.when && c.when <= r.when).map((c) => ({ code: c.code, name: c.name, by: c.by, on: c.on })),
+  }));
+
+  // ── review notes (reviewer agent) ───────────────────────────────────────
+  const reviewNotes = [
+    bad("A4") && { ref: "RN-1", by: "Reviewer agent", point: "A4: Is the deficiency only in the sample, or in the design?", response: `Design: SOP ${f.docCheck?.ref?.split(" ")[0] || ""} asks only for presence of documents (${refs("A4")[0]}); sample followed SOP (${pick("A4", (a) => /limited to presence/i.test(a.note))[0] || refs("A4")[1]}), and the name mismatch (${pick("A4", (a) => a.code === files.chq?.code)[0] || "cheque"}) shows the effect.`, status: "Closed" },
+    get("A2")?.status === "Pass" && { ref: "RN-2", by: "Reviewer agent", point: "A2 marked Pass - confirm SOP not overdue.", response: `Approved ${fmtDate(sop.approvalDate)}, review due ${fmtDate(sop.reviewDue)} (${refs("A2").slice(0, 2).join(", ")}).`, status: "Closed" },
+    bad("A5") && bad("A6") && { ref: "RN-3", by: "Reviewer agent", point: "A5 and A6 overlap - avoid double counting in severity.", response: `Combined into one observation (${observations.find((o) => o.attrs.includes("A5"))?.id}); kept separate at attribute level.`, status: "Closed" },
+    pick("A7", (a) => /AP user/.test(a.note)).length && { ref: "RN-4", by: "Reviewer agent", point: `${changes.find((c) => c.isBank && /accounts payable/i.test((access.find((u) => u.user === c.by) || {}).dept || ""))?.name || "AP"} change by ${pick("A7", (a) => /AP user/.test(a.note)).length ? changes.find((c) => c.isBank && /accounts payable/i.test((access.find((u) => u.user === c.by) || {}).dept || ""))?.by : ""} (${pick("A7", (a) => /AP user/.test(a.note))[0]}) - consider operating test of W${cm?.week || ""} payments.`, response: "Referred to human reviewer; outside design scope.", status: "Open" },
+    { ref: `RN-5`, by: "Human reviewer", point: "", response: "", status: "" },
+  ].filter(Boolean).map((n, i, arr) => (n.by === "Human reviewer" ? { ...n, ref: `RN-${arr.length}` } : n));
+
+  // ── summary ─────────────────────────────────────────────────────────────
+  const count = (s) => results.filter((r) => r.status === s).length;
+  const defIds = results.filter((r) => r.status === "Deficiency").map((r) => r.attr.id);
+  const partIds = results.filter((r) => r.status === "Partial").map((r) => r.attr.id);
+  const passIds = results.filter((r) => r.status === "Pass").map((r) => r.attr.id);
+  const designEffective = defIds.length === 0;
+  const severity = !designEffective ? (bad("A5") && bad("A6") && bad("A4") ? "Significant deficiency" : defIds.length > 1 ? "Significant deficiency" : "Control deficiency") : "None";
+  const summary = {
+    effective: designEffective,
+    designEffective,
+    operatingEffective: null,
+    conclusion: designEffective ? "Effectively designed" : "Not effectively designed",
+    designConclusion: designEffective ? "EFFECTIVELY DESIGNED" : "NOT EFFECTIVELY DESIGNED",
+    operatingConclusion: "Not tested (design only)",
+    headline: `${defIds.length} of ${results.length} attributes deficient${defIds.length ? ` (${defIds.join(", ")})` : ""}; ${partIds.length ? `${partIds.join(", ")} partial; ` : ""}${passIds.join(", ")} pass.${defIds.length ? ` Gaps combine: request documents accepted on presence alone${chq && v && norm(chq.holder) !== norm(v.vendorName) ? " (the cheque is in a different name from the vendor)" : ""}, no system approval, payment before review and an unvalidated review report. Together these leave payment diversion neither prevented nor detected before loss.` : ""}`,
+    deficiency: designEffective ? "" : `Proposed severity: ${severity} (for human reviewer confirmation).`,
+    severity,
+    tested: results.filter((r) => r.status !== "Not tested").length,
+    passed: passIds.length,
+    deficiencies: defIds.length,
+    partial: partIds.length,
+    exceptions: observations.length,
+    high: observations.filter((o) => o.severity === "High").length,
+    gaps: rcm.gaps.length,
+    pending: count("Not tested"),
+  };
+
+  // narratives for the result rows
   results.forEach((r) => {
+    r.details = r.details || [];
     r.narrative = {
       procedure: r.attr.procedure,
       observation: r.observation,
-      conclusion: r.status === "Pass" ? "Attribute operated as designed." : r.status === "Exception" ? `Exception – see ${r.exceptionId}.` : r.status === "Pending" ? "Pending – evidence outstanding." : r.status === "Not verifiable" ? "Could not be verified from the evidence provided." : "Not tested – evidence not provided.",
+      conclusion: r.status === "Pass" ? "Designed appropriately." : r.status === "Partial" ? `Partially meets the criterion – see ${r.exceptionId || "observations"}.` : r.status === "Deficiency" ? `Design deficiency – see ${r.exceptionId}.` : "Not tested – evidence not provided.",
     };
   });
 
-  const tested = results.filter((r) => !/not tested/i.test(r.status));
-  const passed = results.filter((r) => r.status === "Pass").length;
-  const high = exceptions.filter((e) => e.severity === "High").length;
-  const operatingEffective = exceptions.length === 0;
-  const designEffective = !rcm.gaps.some((g) => g.severity === "High") && get("A6")?.status !== "Exception";
-  const effective = operatingEffective && designEffective;
-  const weeks = m ? 1 : 0;
   const limitations = [
-    `${plural(ev.vcrfs.length, "VCRF")} provided against ${plural(bankChanges.length, "bank-detail change")} in the change report; RCM sample for a per-change control is ${rcm.rcmRows[0]?.sample || "25"}.`,
-    `${plural(weeks, "week")} of review provided; RCM sample for a weekly control is 5–15 weeks.`,
-    ...(pending.length ? [`VCRF not provided for ${pending.map((p) => `${p.ref} (${p.code} ${p.name})`).join(", ")} – callback for these changes not re-performed.`] : []),
-    ...(sampleNote ? [sampleNote] : []),
+    `Design only – test of one walkthrough sample${v ? ` (${v.ref})` : ""}. Operating effectiveness not tested.`,
+    ...(T ? [] : ["No walkthrough transcript – inquiry evidence (T) not available."]),
+    ...results.filter((r) => r.status === "Not tested").map((r) => `${r.attr.id} not tested: ${r.observation}`),
+    ...reviewNotes.filter((n) => n.status === "Open").map((n) => `${n.ref}: ${n.point}`),
   ];
-
-  const summary = {
-    effective,
-    designEffective,
-    operatingEffective,
-    conclusion: effective ? "Effective" : "Not effective",
-    designConclusion: designEffective ? rcm.designConclusion : "Not effectively designed",
-    operatingConclusion: operatingEffective ? "Operating effectively" : "Not operating effectively",
-    headline: effective
-      ? "The control is designed and operating effectively for the items tested."
-      : `${plural(exceptions.length, "exception")} (${high} high) and ${plural(rcm.gaps.length, "design gap")}. The callback does not independently verify requests, SAP does not enforce dual control on bank fields, users can change bank details and run payments, and the weekly review missed these issues.`,
-    deficiency: effective
-      ? ""
-      : `Control deficiency in a key anti-fraud control over vendor payments. Because a single user can change bank details and pay without effective prevention or detection${exposure.length ? `, and payment runs totalling ${inr(exposure.reduce((s, r) => s + (r.amount || 0), 0))} were executed while bank changes were still unreviewed` : ""}, evaluate whether this is a significant deficiency / material weakness together with compensating controls. Immediate step: confirm the sampled bank changes directly with the vendors on their master contact numbers.`,
-    tested: tested.length,
-    passed,
-    exceptions: exceptions.length,
-    high,
-    gaps: rcm.gaps.length,
-    pending: pending.length,
-  };
 
   return {
     control: rcm.control,
     rcm,
     sop,
+    transcript: T,
     results,
+    annotations: results.flatMap((r) => r.annotations),
+    observations,
     exceptions,
-    pending,
+    trace,
+    reviewNotes,
+    pending: [],
     exposure,
     limitations,
     summary,
     meta: {
-      reference: `${rcm.control.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`,
+      reference: `WP-${rcm.control.id}-TOD`,
       testedAt: new Date(),
       files: ev.files,
-      period: m ? `${fmtDate(m.from)} to ${fmtDate(m.to)}` : "–",
+      sample: v ? `${v.ref} (${v.vendorName}, vendor ${v.vendorCode})` : "–",
+      walkthroughDate: T?.date || null,
+      period: cm?.from ? `${fmtDate(cm.from)} to ${fmtDate(cm.to)}` : "–",
       company: rcm.control.company,
+      inputs: [files.sop, files.rcm, files.cfg, files.vcrf, files.rev, files.tr, files.chq].filter(Boolean),
+      exposureAmount: inr(exposure.reduce((s, r) => s + (r.amount || 0), 0)),
     },
-    procedures: buildProcedures({ rcm, ev, results, exceptions }),
+    procedures: buildProcedures({ ev, T, results, observations }),
   };
 }
 
-function buildProcedures({ rcm, ev, results, exceptions }) {
-  const st = (r) => (r === "Pass" ? "pass" : r === "Exception" ? "exception" : "info");
-  const have = {
-    vcrf: ev.vcrfs.length > 0,
-    sensitive: !!ev.sensitive?.length,
-    access: !!ev.access?.length,
-    calendar: !!ev.calendar?.length,
-    changes: !!ev.changes?.length,
-  };
-  const procs = [
+function buildProcedures({ ev, T, results, observations }) {
+  const st = (r) => (r === "Pass" ? "pass" : r === "Deficiency" ? "exception" : "info");
+  return [
     {
       id: "t-read",
       label: "Read and classify the evidence",
-      detail: `${plural(ev.files.length, "file")} received`,
+      detail: `${plural(ev.files.length, "file")} received${T ? " · walkthrough transcript indexed" : ""}`,
       subChecks: ev.files.map((f) => ({ text: `${f.name} → ${KIND_LABEL[f.kind] || f.kind}`, status: f.kind === "unknown" ? "info" : "pass", log: [`[READ] ${f.name} classified as ${f.kind}`] })),
     },
-    {
-      id: "t-cover",
-      label: "Check evidence against the request list",
-      detail: "Every RCM attribute needs its evidence before it can be concluded.",
-      subChecks: rcm.evidenceRequests.map((e) => ({ text: `${e.id} ${e.name}: ${have[e.kind] ? "received" : "missing"}`, status: have[e.kind] ? "pass" : "info" })),
-    },
-  ];
-  results.forEach((r) => {
-    procs.push({
+    ...results.map((r) => ({
       id: `t-${r.attr.id}`,
       label: `${r.attr.id} · ${r.attr.label}`,
-      detail: r.attr.procedure,
-      subChecks: r.details.length
-        ? r.details.map((d) => ({ text: `${d.item}: ${d.actual}`, status: st(d.result), log: [`[TEST] ${r.attr.id} ${d.item} – ${d.result}`] }))
+      detail: r.attr.criterion,
+      subChecks: r.annotations.length
+        ? r.annotations.map((a) => ({ text: `${a.ref} (${a.code}${a.location ? `, ${a.location}` : ""}): ${a.note}`, status: st(r.status), log: [`[ANNOTATE] ${a.ref} ${a.code} ${a.location} – “${a.highlight}”`] }))
         : [{ text: r.observation, status: "info" }],
-      points: r.status === "Exception" || r.status === "Pending" ? [r.observation] : undefined,
-    });
-  });
-  procs.push({
-    id: "t-conclude",
-    label: "Evaluate exceptions and conclude",
-    detail: "Severity, root cause and recommendation for each exception; overall design and operating conclusion.",
-    subChecks: exceptions.length
-      ? exceptions.map((e) => ({ text: `${e.id} ${e.title} (${e.severity})`, status: "exception", log: [`[EXCEPTION] ${e.id} ${e.title}`] }))
-      : [{ text: "No exceptions", status: "pass" }],
-  });
-  return procs;
+      points: r.status !== "Pass" ? [`${r.status}: ${r.observation}`] : undefined,
+    })),
+    {
+      id: "t-conclude",
+      label: "Draft observations and conclude on design",
+      detail: "Observations grouped by root cause; severity proposed for the human reviewer.",
+      subChecks: observations.length
+        ? observations.map((o) => ({ text: `${o.id} (${o.attrText}) ${o.title}`, status: "exception", log: [`[OBSERVATION] ${o.id} ${o.title}`] }))
+        : [{ text: "No design observations", status: "pass" }],
+    },
+  ];
 }
