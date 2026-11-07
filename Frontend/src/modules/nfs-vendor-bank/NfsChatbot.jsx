@@ -18,7 +18,7 @@ import { TOTAL_STEPS, DEMO_DOCS, DEMO_EVIDENCE } from "./data/constants";
 
 // Excel writers load on first download
 const exportNfs = () => import("./exportNfs");
-const downloadRcm = async (rcm, sop) => (await exportNfs()).downloadRcm(rcm, sop);
+const downloadRcm = async (rcm) => (await exportNfs()).downloadRcm(rcm);
 const downloadWorkpaper = async (result) => (await exportNfs()).downloadWorkpaper(result);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,18 +39,6 @@ async function demoFile(name) {
   return new File([await res.blob()], name);
 }
 
-const RCM_TABLE_COLS = [
-  { key: "controlId", label: "Control ID", mono: true },
-  { key: "activity", label: "Control activity", minWidth: 200 },
-  { key: "type", label: "Type" },
-  { key: "nature", label: "Nature" },
-  { key: "frequency", label: "Frequency" },
-  { key: "performer", label: "Performed by" },
-  { key: "sopRef", label: "SOP ref" },
-  { key: "attributes", label: "Attributes" },
-  { key: "sample", label: "Sample" },
-  { key: "design", label: "Design", type: "badge" },
-];
 
 export default function NfsChatbot({ config, onTitle, onNewChat }) {
   const idRef = useRef(2);
@@ -213,9 +201,21 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
             tables={[
               {
                 title: "Risk and control matrix",
-                note: `${rcm.control.riskId} – ${rcm.control.riskDesc}`,
-                columns: RCM_TABLE_COLS,
-                rows: rcm.rcmRows,
+                note: rcm.rcmHeader.process,
+                columns: [
+                  { key: "riskId", label: "Risk ID", mono: true },
+                  { key: "riskDesc", label: "Risk description", minWidth: 200 },
+                  { key: "controlId", label: "Control ID", mono: true },
+                  { key: "controlDesc", label: "Control description", minWidth: 380 },
+                  { key: "type", label: "Control type", minWidth: 130 },
+                  { key: "nature", label: "Nature" },
+                  { key: "frequency", label: "Frequency", minWidth: 130 },
+                  { key: "owner", label: "Control owner", minWidth: 150 },
+                  { key: "assertion", label: "Assertion", minWidth: 160 },
+                  { key: "evidence", label: "Key evidence", minWidth: 200 },
+                  { key: "system", label: "Key system / report", minWidth: 180 },
+                ],
+                rows: [rcm.rcmRow],
               },
               {
                 title: "Walkthrough checked against the SOP",
@@ -252,7 +252,7 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
             ]}
           />
         ),
-        actions: [{ id: "rcm", label: "Download RCM (Excel)", icon: Download }],
+        actions: [{ id: "rcm", label: "Download RCM", icon: Download }],
       },
       300
     );

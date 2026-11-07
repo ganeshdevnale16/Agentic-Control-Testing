@@ -54,54 +54,10 @@ function table(wb, name, cols, rows, colorKeys = []) {
   return ws;
 }
 
-function kvSheet(wb, name, title, sub, sections) {
-  const ws = wb.addWorksheet(name);
-  ws.columns = [{ width: 30 }, { width: 100 }];
-  ws.addRow([title]).font = { bold: true, size: 14 };
-  ws.addRow([sub]).font = { color: { argb: "FF64748B" } };
-  for (const [head, rows] of sections) {
-    ws.addRow([]);
-    const h = ws.addRow([head, ""]);
-    h.eachCell((c) => {
-      c.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      c.fill = FILL("FF000000");
-    });
-    for (const [k, v, isResult] of rows) {
-      const r = ws.addRow([k, v ?? ""]);
-      r.getCell(1).font = { bold: true, color: { argb: "FF475569" } };
-      r.eachCell({ includeEmpty: true }, (c) => {
-        c.border = BORDER;
-        c.alignment = { vertical: "top", wrapText: true };
-      });
-      if (isResult) color(r.getCell(2));
-      r.height = Math.min(300, Math.max(20, lines(v, 100) * 14));
-    }
-  }
-  return ws;
-}
 
-const RCM_COLS = [
-  ["process", "Process", 16],
-  ["subProcess", "Sub-process", 18],
-  ["riskId", "Risk ID", 11],
-  ["riskDesc", "Risk description", 36],
-  ["controlId", "Control ID", 12],
-  ["activity", "Control activity", 26],
-  ["description", "Control description", 50],
-  ["type", "Type", 12],
-  ["nature", "Nature", 16],
-  ["frequency", "Frequency", 13],
-  ["performer", "Performed by", 18],
-  ["owner", "Control owner", 22],
-  ["assertion", "Assertion", 22],
-  ["sopRef", "SOP reference", 14],
-  ["attributes", "Test attributes", 12],
-  ["sample", "Sample size", 16],
-  ["design", "Design assessment", 16],
-];
 
 function rcmSheets(wb, rcm) {
-  table(wb, "RCM", RCM_COLS, rcm.rcmRows, ["design"]);
+  rcmFormatSheet(wb, rcm, "RCM");
   table(wb, rcm.labels?.consistencySheet || "Walkthrough vs SOP", [["check", "Check", 30], ["result", "Result", 12], ["detail", "Detail", 80]], rcm.consistency, ["result"]);
   table(
     wb,
@@ -122,15 +78,59 @@ function rcmSheets(wb, rcm) {
 
 const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-export async function downloadRcm(rcm, sop) {
+// RCM in the client's format (same layout as the RCM extract): title lines, then one row per control
+const RCM_FORMAT = [
+  ["riskId", "Risk ID", 10],
+  ["riskDesc", "Risk description", 32],
+  ["controlId", "Control ID", 9],
+  ["controlDesc", "Control description", 60],
+  ["type", "Control type", 16],
+  ["nature", "Nature", 10],
+  ["frequency", "Frequency", 16],
+  ["owner", "Control owner", 22],
+  ["assertion", "Assertion", 22],
+  ["evidence", "Key evidence", 28],
+  ["system", "Key system / report", 28],
+];
+function rcmFormatSheet(wb, rcm, name) {
+  const ws = wb.addWorksheet(name || rcm.rcmHeader.sheet);
+  ws.columns = RCM_FORMAT.map(([, , w]) => ({ width: w }));
+  const font = { name: "Arial", size: 10 };
+  const version = rcm.wt?.meta?.version || `FY ${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(2)}`;
+  [
+    [rcm.rcmHeader.title, true],
+    [rcm.rcmHeader.process, false],
+    [`RCM version: ${version} | Prepared by: Agentic Controls Testing | Date: ${fmtDate(new Date())}`, false],
+  ].forEach(([t, b], i) => {
+    ws.getCell(i + 1, 1).value = t;
+    ws.getCell(i + 1, 1).font = { ...font, bold: b };
+  });
+  const head = ws.getRow(5);
+  RCM_FORMAT.forEach(([, label], i) => {
+    const c = head.getCell(i + 1);
+    c.value = label;
+    c.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = FILL("FF1F3864");
+    c.alignment = { vertical: "top", wrapText: true };
+    c.border = BORDER;
+  });
+  const row = ws.getRow(6);
+  RCM_FORMAT.forEach(([k], i) => {
+    const c = row.getCell(i + 1);
+    c.value = rcm.rcmRow[k];
+    c.font = font;
+    c.alignment = { vertical: "top", wrapText: true };
+    c.border = BORDER;
+  });
+  row.height = Math.max(...RCM_FORMAT.map(([k, , w]) => lines(rcm.rcmRow[k], w))) * 13 + 6;
+  return ws;
+}
+
+export async function downloadRcm(rcm) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Agentic Controls Testing";
-  kvSheet(wb, "Summary", `RCM – ${rcm.control.subProcess}`, `${rcm.control.company} · generated ${new Date().toLocaleString()}`, [
-    ["Control", [["Control ID", rcm.control.id], ["Risk", `${rcm.control.riskId} – ${rcm.control.riskDesc}`], ["Control description", rcm.control.description], ["Owner", rcm.control.owner]]],
-    ["Source documents", [[rcm.labels?.doc || "SOP", `${sop.name} (${sop.docId} v${sop.version}, approved ${fmtDate(sop.approvalDate)})`], ["Design conclusion", rcm.designConclusion, true], ["Design gaps", String(rcm.gaps.length)]]],
-  ]);
-  rcmSheets(wb, rcm);
-  saveAs(new Blob([await wb.xlsx.writeBuffer()]), `RCM_${rcm.control.id}_${stamp()}.xlsx`);
+  rcmFormatSheet(wb, rcm);
+  saveAs(new Blob([await wb.xlsx.writeBuffer()]), `RCM_${rcm.control.id}_${rcm.control.subProcess.replace(/\s+/g, "_")}_${stamp()}.xlsx`);
 }
 
 // ── Test-of-design workpaper (WP-<control>-TOD) ───────────────────────────
@@ -310,6 +310,13 @@ export async function downloadWorkpaper(result) {
     r.getCell(2).font = { bold: true };
     [2, 3].forEach((i) => (r.getCell(i).border = BORDER));
   });
+
+  // Exception summary – one point per attribute
+  const es = wb.addWorksheet("Exception Summary");
+  titleRows(es, `${ref} - Exception summary`, `${summary.deficiencies} deficient, ${summary.partial} partial, ${summary.passed} pass · ${summary.designConclusion}`);
+  grid(es, [7, 26, 13, 8, 90, 30], ["Attr", "Attribute", "Result", "Obs", "Summary", "Annotation refs"],
+    result.exceptionSummary.map((b) => [b.id, b.head.replace(/^A\d+\s/, ""), b.status, b.obs || "–", b.text, b.refs.join(", ")]),
+    { resultCol: 3 });
 
   // 8. Annotated evidence
   const aev2 = wb.addWorksheet("Annotated Evidence");

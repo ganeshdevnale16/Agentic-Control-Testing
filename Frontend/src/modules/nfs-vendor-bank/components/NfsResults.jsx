@@ -72,7 +72,7 @@ const btn = (primary) => ({
 
 export default function NfsResults({ result, onOpenReport, onDownloadExcel, onDownloadRcm }) {
   const [open, setOpen] = useState({});
-  const { summary, results, exceptions, trace, exposure, limitations, meta, reviewNotes } = result;
+  const { summary, results, exceptions, trace, exposure, limitations, meta, reviewNotes, exceptionSummary } = result;
   const ok = summary.designEffective;
 
   return (
@@ -100,6 +100,18 @@ export default function NfsResults({ result, onOpenReport, onDownloadExcel, onDo
         <Kpi value={exceptions.length} label="Observations" tone={exceptions.length ? "bad" : "ok"} />
         <Kpi value={result.annotations.length} label="Annotations" />
       </div>
+
+      <Section note={`${summary.deficiencies} deficient, ${summary.partial} partial, ${summary.passed} pass – one point per attribute.`}>Exception summary</Section>
+      <ul style={{ listStyle: "none", padding: 0, margin: 0, border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff" }}>
+        {exceptionSummary.map((b, i) => (
+          <li key={b.id} style={{ display: "flex", gap: 10, padding: "8px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", fontSize: 13, lineHeight: 1.55 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0, marginTop: 6, background: { ok: "#26890D", warn: "#ED8B00", bad: "#DA291C", na: "#94a3b8" }[b.tone] }} />
+            <span>
+              <strong>{b.head}:</strong> {b.text}
+            </span>
+          </li>
+        ))}
+      </ul>
 
       <Section note="Click a row to see the procedure, observation and the annotated evidence (A{n}-{k}) behind the result.">Test of design by attribute</Section>
       <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
@@ -219,7 +231,7 @@ export default function NfsResults({ result, onOpenReport, onDownloadExcel, onDo
           <FileText size={14} /> View full report (PDF)
         </button>
         <button onClick={onDownloadExcel} style={btn(false)}>
-          <Download size={14} /> Download workpaper (Excel)
+          <Download size={14} /> Download workpaper
         </button>
         <button onClick={onDownloadRcm} style={btn(false)}>
           <TableProperties size={14} /> Download RCM

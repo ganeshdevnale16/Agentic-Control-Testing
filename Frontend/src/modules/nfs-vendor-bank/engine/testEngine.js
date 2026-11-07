@@ -417,6 +417,22 @@ export function runTest({ rcm, sop, evidence }) {
     };
   });
 
+  // ── exception summary: one point per attribute ──────────────────────────
+  const exceptionSummary = results.map((r) => ({
+    id: r.attr.id,
+    head: `${r.attr.id} ${r.attr.label}`,
+    status: r.status,
+    tone: r.status === "Pass" ? "ok" : r.status === "Partial" ? "warn" : r.status === "Deficiency" ? "bad" : "na",
+    obs: r.exceptionId || "",
+    text:
+      r.status === "Pass"
+        ? `No exception – ${r.observation}`
+        : r.status === "Not tested"
+          ? `Not tested – ${r.observation}`
+          : `${r.status === "Partial" ? "Partial" : "Design deficiency"}${r.exceptionId ? ` (${r.exceptionId})` : ""} – ${r.observation}`,
+    refs: r.annotations.map((a) => a.ref),
+  }));
+
   const limitations = [
     `Design only – test of one walkthrough sample${v ? ` (${v.ref})` : ""}. Operating effectiveness not tested.`,
     ...(T ? [] : ["No walkthrough transcript – inquiry evidence (T) not available."]),
@@ -433,6 +449,7 @@ export function runTest({ rcm, sop, evidence }) {
     annotations: results.flatMap((r) => r.annotations),
     observations,
     exceptions,
+    exceptionSummary,
     trace,
     reviewNotes,
     pending: [],

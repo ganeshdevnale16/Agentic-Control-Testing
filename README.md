@@ -106,6 +106,8 @@ This is a scripted demo: any uploaded file gives the same result. Round 2 tests 
 Flow: **1** upload the **SOP and the walkthrough** (only these two) → **2** walkthrough checked against the SOP, RCM and
 test-of-design plan generated → **3** upload evidence → **4** test of design, observations, report and workpaper.
 
+**RCM download** is in the client's format (same as the NFS-02 RCM extract: title lines, then one row per control).
+
 **Scripted demo:** whatever files are uploaded, the tool reads the predefined files from the *Design Testing Evidence Pack v3*
 (`public/demo/nfs`), so the result is always the same and matches WP-P2P-04-TOD.
 
@@ -129,7 +131,7 @@ A6 System alignment · A7 Segregation of duties · A8 Information used (IPE) · 
 
 ## Workpaper – downloaded as a zip: WP-P2P-04-TOD_Design_Test_Workpaper.xlsx + Annotated_Evidence folder
 Cover · Legend · ToD Testing · Walkthrough Trace · Annotation Index (links to the annotated copy) · Observations (O1–O5, draft for
-management response) · Review & Sign-off (reviewer-agent notes RN-1… and human sign-off fields) · **Annotated Evidence** (each
+management response) · Review & Sign-off · **Exception Summary** (one point per attribute) (reviewer-agent notes RN-1… and human sign-off fields) · **Annotated Evidence** (each
 source page / sheet with highlights and A{n}-{k} tags, coloured by result) · RCM, evidence inputs and processing log.
 
 ## Code

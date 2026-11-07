@@ -167,7 +167,7 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
 
   // ── RCM rows ────────────────────────────────────────────────────────────
   const riskId = ctl?.riskId || "R-P2P-02";
-  const riskDesc = ctl?.riskDesc || "Unauthorised or fraudulent change to vendor bank details diverts payments.";
+  const riskDesc = ctl?.riskDesc || "Unauthorised or fraudulent change to vendor bank details diverts payments to a fraudster's account";
   const rcmRows = [
     ...acts.map((a) => ({
       process: wt?.meta?.process || "Procure-to-Pay",
@@ -225,7 +225,43 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
     subProcess: wt?.meta?.subProcess || "Vendor Master Maintenance",
   };
 
-  return { control, activities: acts, consistency, design, gaps, designConclusion, attributes, evidenceRequests, rcmRows, transcript, wt, procedures: buildProcedures({ sop, wt, transcript, acts, consistency, design, attributes, evidenceRequests, today }) };
+  // ── RCM in the client's format: one row per control, activities lettered in the description
+  const req = acts.find((a) => a.kind === "request");
+  const chk = acts.find((a) => a.kind === "check" || a.kind === "callback");
+  const upd = acts.find((a) => a.kind === "update");
+  const rev = acts.find((a) => a.kind === "review");
+  const preventive = [req, chk || upd].filter(Boolean).length;
+  const L = (i) => String.fromCharCode(97 + i);
+  const parts = [
+    req && `Vendor bank-detail changes are raised on a VCRF with the vendor's letterhead request and cancelled cheque of the new account.`,
+    (chk || upd) &&
+      (chk?.kind === "check" || !chk
+        ? `The ${f.docCheck?.performer || f.update.performer || "MDM Executive"} checks that both documents are attached and makes the change in SAP (${f.update.txn || "XK02"}).`
+        : `The ${f.callback.performer || "MDM Executive"} performs a callback to verify the request and makes the change in SAP (${f.update.txn || "XK02"}).`),
+    rev && `Every ${f.review.day || "week"} the ${f.review.reviewer || "Finance Controller"} reviews the sensitive-field change report for the prior week and signs off.`,
+  ].filter(Boolean);
+  const range = (a, b) => (a === b ? L(a) : `${L(a)}-${L(b)}`);
+  const lastP = Math.max(0, preventive - 1);
+  const rcmRow = {
+    riskId,
+    riskDesc,
+    controlId,
+    controlDesc: parts.map((t, i) => `(${L(i)}) ${t}`).join(" "),
+    type: rev ? `Preventive (${range(0, lastP)}); Detective (${L(parts.length - 1)})` : "Preventive",
+    nature: "Manual",
+    frequency: rev ? `Per change (${range(0, lastP)}); ${f.review.frequency || "Weekly"} (${L(parts.length - 1)})` : "Per change",
+    owner,
+    assertion: "Occurrence / Existence; Safeguarding of assets",
+    evidence: `VCRF with request letter and cancelled cheque${rev ? "; signed weekly change report" : ""}`,
+    system: `SAP S/4HANA change documents${f.review.toExcel ? "; Excel change report" : ""}`,
+  };
+  const rcmHeader = {
+    title: `${sop.company || "Company"} - Risk and Control Matrix (Extract)`,
+    process: `Process: ${wt?.meta?.process || "Procure-to-Pay"} | Sub-process: ${wt?.meta?.subProcess || "Vendor Master Maintenance"}`,
+    sheet: `RCM - ${(wt?.meta?.subProcess || "Vendor Master Maintenance").replace(/\s*Maintenance$/i, "")}`.slice(0, 31),
+  };
+
+  return { rcmRow, rcmHeader, control, activities: acts, consistency, design, gaps, designConclusion, attributes, evidenceRequests, rcmRows, transcript, wt, procedures: buildProcedures({ sop, wt, transcript, acts, consistency, design, attributes, evidenceRequests, today }) };
 }
 
 function designFor(kind, design) {

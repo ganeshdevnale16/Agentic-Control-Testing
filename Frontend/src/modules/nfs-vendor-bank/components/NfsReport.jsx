@@ -41,7 +41,7 @@ const SEVERITY = [
 ];
 
 export default function NfsReport({ result, onClose, onDownloadExcel }) {
-  const { meta, control, summary, results, exceptions, rcm, sop, exposure, limitations, trace, reviewNotes, annotations } = result;
+  const { meta, control, summary, results, exceptions, rcm, sop, exposure, limitations, trace, reviewNotes, annotations, exceptionSummary } = result;
   const date = meta.testedAt.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
   const ok = summary.designEffective;
   const L = result.labels || {};
@@ -73,7 +73,7 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
             <Printer size={14} /> Print / Save as PDF
           </button>
           <button className="rp-btn" onClick={onDownloadExcel}>
-            <Download size={14} /> Download workpaper (Excel)
+            <Download size={14} /> Download workpaper
           </button>
           <span style={{ flex: 1 }} />
           <button className="rp-btn" onClick={onClose} aria-label="Close report">
@@ -145,6 +145,15 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
               <span>Observations</span>
             </div>
           </div>
+
+          <h3>Exception summary</h3>
+          <ul style={{ paddingLeft: 18, listStyle: "disc" }}>
+            {exceptionSummary.map((b) => (
+              <li key={b.id}>
+                <b>{b.head}:</b> {b.text}
+              </li>
+            ))}
+          </ul>
 
           <h2>2. Control and risk</h2>
           <Table
