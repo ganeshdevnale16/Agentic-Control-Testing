@@ -63,7 +63,7 @@ export function parseVcrf(text, name) {
     docCheck: dcSec
       ? {
           when: parseDate((dcSec.match(DATE_RE_G) || [])[0], (dcSec.match(/\b(\d{1,2}:\d{2})\b/) || [])[1]),
-          items: (dcSec.match(/(request letter|cancell?ed cheque)[^.]*?attached/gi) || []).map(clean),
+          items: [...(dcSec.match(/cancell?ed cheque attached/gi) || []), ...(dcSec.match(/request letter[^.]*?attached/gi) || [])].map(clean),
           by: (dcSec.match(/([A-Z][a-z]+ [A-Z]\.?)\s*\(([A-Z]{2,}\d{1,3})\)/) || [])[1] || "",
           byUser: (dcSec.match(/\(([A-Z]{2,}\d{1,3})\)/) || [])[1] || "",
           presenceOnly: !/(match|agree|compar|name check|domain|signatory check)/i.test(dcSec.replace(/^document check[^)]*\)/i, "")),

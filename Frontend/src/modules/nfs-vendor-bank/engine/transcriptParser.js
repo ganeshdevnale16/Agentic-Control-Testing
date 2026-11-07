@@ -15,9 +15,12 @@ export function parseTranscript(text, name) {
   for (const m of raw.matchAll(re)) {
     lines.push({ time: m[1], speaker: clean(m[2]), role: clean(m[3] || ""), text: clean(m[4].replace(/\n.*\|\s*.*Page \d+\s*$/gm, "")), page: pageAt(m.index) });
   }
-  const dateLine = (raw.match(/walkthrough date\s*:?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})/i) || [])[1];
+  const dateLine = (raw.match(/(?:walkthrough|meeting) date[^\d\n]*(\d{1,2}-[A-Za-z]{3}-\d{4})/i) || [])[1];
   const sample = clean((raw.match(/sample traced\s*:?\s*(.+)/i) || [])[1] || "");
-  const participants = clean((raw.match(/participants\s*:?\s*([\s\S]+?)\nRecorded by/i) || [])[1] || "");
+  const participants = clean((raw.match(/(?:participants|attendees)\s*:?\s*([\s\S]+?)\n(?:Recorded by|Sample traced)/i) || [])[1] || "");
+  const emails = [...new Set(raw.match(/[\w.+-]+@[\w-]+\.[\w.]*\w/g) || [])];
+  const conductedBy = clean((raw.match(/conducted by\s*:?\s*(.+)/i) || [])[1] || "");
+  const reference = clean((raw.match(/recording reference:\s*([\w/.-]+)/i) || [])[1] || "");
 
   // Find a quote; returns the line and page it is on
   const find = (quote) => {
@@ -27,5 +30,5 @@ export function parseTranscript(text, name) {
   };
   const by = (speakerRe) => lines.filter((l) => speakerRe.test(l.speaker));
 
-  return { name, date: parseDate(dateLine), sample, participants, lines, find, by };
+  return { name, date: parseDate(dateLine), sample, participants, emails, conductedBy, reference, lines, find, by };
 }

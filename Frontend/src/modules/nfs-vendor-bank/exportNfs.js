@@ -102,7 +102,7 @@ const RCM_COLS = [
 
 function rcmSheets(wb, rcm) {
   table(wb, "RCM", RCM_COLS, rcm.rcmRows, ["design"]);
-  table(wb, "Walkthrough vs SOP", [["check", "Check", 30], ["result", "Result", 12], ["detail", "Detail", 80]], rcm.consistency, ["result"]);
+  table(wb, rcm.labels?.consistencySheet || "Walkthrough vs SOP", [["check", "Check", 30], ["result", "Result", 12], ["detail", "Detail", 80]], rcm.consistency, ["result"]);
   table(
     wb,
     "Design Assessment",
@@ -127,7 +127,7 @@ export async function downloadRcm(rcm, sop) {
   wb.creator = "Agentic Controls Testing";
   kvSheet(wb, "Summary", `RCM – ${rcm.control.subProcess}`, `${rcm.control.company} · generated ${new Date().toLocaleString()}`, [
     ["Control", [["Control ID", rcm.control.id], ["Risk", `${rcm.control.riskId} – ${rcm.control.riskDesc}`], ["Control description", rcm.control.description], ["Owner", rcm.control.owner]]],
-    ["Source documents", [["SOP", `${sop.name} (${sop.docId} v${sop.version}, approved ${fmtDate(sop.approvalDate)})`], ["Design conclusion", rcm.designConclusion, true], ["Design gaps", String(rcm.gaps.length)]]],
+    ["Source documents", [[rcm.labels?.doc || "SOP", `${sop.name} (${sop.docId} v${sop.version}, approved ${fmtDate(sop.approvalDate)})`], ["Design conclusion", rcm.designConclusion, true], ["Design gaps", String(rcm.gaps.length)]]],
   ]);
   rcmSheets(wb, rcm);
   saveAs(new Blob([await wb.xlsx.writeBuffer()]), `RCM_${rcm.control.id}_${stamp()}.xlsx`);
@@ -177,6 +177,8 @@ const ownerName = (o) => {
 export async function downloadWorkpaper(result) {
   const { summary, control, rcm, meta, results, annotations, observations, trace, reviewNotes } = result;
   const ref = meta.reference;
+  const L = result.labels || {};
+  const sampleRef = L.sampleRef || (meta.sample.match(/VCR-[\d-]+/) || [meta.sample])[0];
   const today = fmtDate(new Date());
   const wb = new ExcelJS.Workbook();
   wb.creator = "Agentic Controls Testing";
@@ -203,12 +205,12 @@ export async function downloadWorkpaper(result) {
     ["Workpaper ref", ref],
     ["Engagement", `Internal Audit - ICFR design assessment${version ? ` ${version}` : ""}`],
     ["Process / sub-process", `${control.process} / ${control.subProcess}`],
-    ["Control ID", `${control.id} - Vendor bank-detail change control`],
+    ["Control ID", L.controlName || `${control.id} - Vendor bank-detail change control`],
     ["Risk", `${control.riskId}: ${control.riskDesc}`],
     ["Control owner", ownerName(control.owner)],
-    ["Objective", `Assess whether ${control.id}, as designed, prevents or timely detects unauthorised vendor bank-detail changes before payment.`],
-    ["Scope", `Design only (test of one walkthrough sample ${(meta.sample.match(/VCR-[\d-]+/) || [meta.sample])[0]}). Operating effectiveness not tested.`],
-    ["Evidence inputs", `${codes[0]} to ${codes[codes.length - 1]} (see 'Annotation Index'; annotated copies in sheet 'Annotated Evidence')`],
+    ["Objective", L.objective || `Assess whether ${control.id}, as designed, prevents or timely detects unauthorised vendor bank-detail changes before payment.`],
+    ["Scope", `Design only (test of one walkthrough sample ${sampleRef}). Operating effectiveness not tested.`],
+    ["Evidence inputs", `${codes[0]} to ${codes[codes.length - 1]} (see 'Annotation Index'; annotated copies in folder Annotated_Evidence)`],
     ["Walkthrough date", fmtDate(meta.walkthroughDate)],
     ["Prepared by", `DT-Agent (Assessment agent) - ${today}`],
     ["First-level review", `DT-Agent (Reviewer agent) - ${today}`],
@@ -241,7 +243,7 @@ export async function downloadWorkpaper(result) {
     ["✓", "Agreed to source without exception"],
     ["✗", "Exception / design gap noted"],
     ["◐", "Partially meets criterion"],
-    ["T", `Corroborated in walkthrough transcript (${meta.inputs.find((i) => /transcript/i.test(i.name))?.code || "walkthrough"})`],
+    ["T", `Corroborated in walkthrough ${L.walkthrough || "transcript"} (${meta.inputs.find((i) => /transcript|walkthrough/i.test(i.name))?.code || "walkthrough"})`],
   ]);
   [4, 5, 6].forEach((r, i) => (lg.getCell(`A${r}`).fill = FILL(["FFE3F1CC", "FFFDE2DF", "FFFFF1D6"][i])));
 
@@ -255,8 +257,8 @@ export async function downloadWorkpaper(result) {
 
   // 4. Walkthrough Trace
   const wtr = wb.addWorksheet("Walkthrough Trace");
-  titleRows(wtr, `${ref} - Walkthrough trace of ${(meta.sample.match(/VCR-[\d-]+/) || [meta.sample])[0]}`, "Each step traced from SOP to evidence and transcript");
-  grid(wtr, [6, 10, 36, 60, 22, 24, 40], ["Step", "SOP ref", "Designed step", "Evidence observed", "Transcript", "Performed as designed?", "Annotation / note"],
+  titleRows(wtr, `${ref} - Walkthrough trace of ${sampleRef}`, `Each step traced from ${L.doc || "SOP"} to evidence and ${L.walkthrough || "transcript"}`);
+  grid(wtr, [6, 12, 36, 60, 22, 24, 40], ["Step", `${L.doc || "SOP"} ref`, "Designed step", "Evidence observed", L.walkthrough === "note" ? "Walkthrough note" : "Transcript", "Performed as designed?", "Annotation / note"],
     trace.map((t) => [t.step, t.sopRef, t.designed, t.observed, t.transcript, t.performed, t.note]));
 
   // rows where each annotated image will sit (sheet is added after the template sheets)
@@ -269,21 +271,24 @@ export async function downloadWorkpaper(result) {
 
   // 5. Annotation Index
   const idx = wb.addWorksheet("Annotation Index");
-  titleRows(idx, `${ref} - Annotation index`, "Click the annotated file to open the highlighted copy in 'Annotated Evidence'");
-  grid(idx, [8, 26, 12, 9, 44, 28, 34, 60], ["Ref", "Attribute", "Result", "Evidence", "Annotated file", "Location", "Highlighted text / cells", "Annotation"],
+  titleRows(idx, `${ref} - Annotation index`, "Click the file name to open the annotated evidence (keep the Annotated_Evidence folder beside this workpaper)");
+  grid(idx, [8, 26, 12, 9, 50, 28, 34, 60, 14], ["Ref", "Attribute", "Result", "Evidence", "Annotated file", "Location", "Highlighted text / cells", "Annotation", "In workpaper"],
     annotations.map((a) => {
       const r = results.find((x) => x.attr.id === a.attr);
-      return [a.ref, `${a.attr} ${r?.attr.label || ""}`, a.result, a.code, a.file.replace(/(\.[a-z]+)$/i, "_ANNOTATED$1"), a.location, a.highlight, a.note];
+      return [a.ref, `${a.attr} ${r?.attr.label || ""}`, a.result, a.code, a.file.replace(/(\.[a-z]+)$/i, "_ANNOTATED$1"), a.location, a.highlight, a.note, ""];
     }),
     { resultCol: 3 });
+  const link = { color: { argb: "FF0563C1" }, underline: true };
   idx.eachRow((r, i) => {
     if (i < 5) return;
-    const refId = r.getCell(1).value;
-    const target = annotatedRow[refId];
+    const file = r.getCell(5);
+    file.value = { text: String(file.value), hyperlink: `Annotated_Evidence/${file.value}` };
+    file.font = link;
+    const target = annotatedRow[r.getCell(1).value];
     if (target) {
-      const c = r.getCell(5);
-      c.value = { text: String(c.value), hyperlink: `#'Annotated Evidence'!A${target}` };
-      c.font = { color: { argb: "FF0563C1" }, underline: true };
+      const v = r.getCell(9);
+      v.value = { text: "View image", hyperlink: `#'Annotated Evidence'!A${target}` };
+      v.font = link;
     }
   });
 
@@ -329,5 +334,24 @@ export async function downloadWorkpaper(result) {
     [["time", "Time", 12], ["text", "Activity", 110]],
     [...(result.rcmLog || []), ...(result.log || [])].map((l) => ({ time: l.time.toLocaleTimeString([], { hour12: false }), text: l.text }))
   );
-  saveAs(new Blob([await wb.xlsx.writeBuffer()]), `${ref}_Design_Test_Workpaper_${stamp()}.xlsx`);
+  // Workpaper + Annotated_Evidence folder, zipped together so the links in 'Annotation Index' work
+  const xlsx = await wb.xlsx.writeBuffer();
+  const name = `${ref}_Design_Test_Workpaper`;
+  try {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file(`${name}.xlsx`, xlsx);
+    const folder = zip.folder("Annotated_Evidence");
+    const { ANNOTATED_FILES } = await import("./data/constants");
+    await Promise.all(
+      ANNOTATED_FILES.map(async (f) => {
+        const res = await fetch(`${import.meta.env.BASE_URL}demo/nfs/Annotated_Evidence/${f}`);
+        if (res.ok) folder.file(f, await res.arrayBuffer());
+      })
+    );
+    saveAs(await zip.generateAsync({ type: "blob" }), `${name}_${stamp()}.zip`);
+  } catch (e) {
+    console.warn("zip failed – downloading the workpaper only", e);
+    saveAs(new Blob([xlsx]), `${name}_${stamp()}.xlsx`);
+  }
 }

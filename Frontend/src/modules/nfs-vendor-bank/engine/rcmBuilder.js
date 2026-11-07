@@ -155,13 +155,15 @@ export function buildRcm({ sop, wt, transcript, today = new Date() }) {
   }));
 
   const evidenceRequests = [
-    { id: "E1", code: "NFS-04", name: "VCRF for the walkthrough sample, with the document check and SAP update", kind: "vcrf", for: "A4, A5, A7, A10", note: "Sample VCR-2026-0389" },
-    { id: "E2", code: "NFS-07", name: "Cancelled cheque attached to the VCRF", kind: "cheque", for: "A4, A10", note: "Scanned copy from DMS" },
-    { id: "E3", code: "NFS-03", name: "SAP sensitive-field configuration (T055F)", kind: "sensitive", for: "A6", note: "Extract by SAP Basis" },
-    { id: "E4", code: "NFS-03", name: "SAP user access extract (SUIM) – XK02/FK02, F110, FK08", kind: "access", for: "A7", note: "Finance users" },
-    { id: "E5", code: "NFS-03", name: "F110 payment run calendar", kind: "calendar", for: "A5", note: "Sample week" },
+    { id: "E1", code: "NFS-02", name: "Existing RCM extract for the control", kind: "rcm", for: "A1, A3", note: "Client RCM FY 2026-27" },
+    { id: "E2", code: "NFS-03", name: "SAP sensitive-field configuration (T055F)", kind: "sensitive", for: "A6", note: "Extract by SAP Basis" },
+    { id: "E3", code: "NFS-03", name: "SAP user access extract (SUIM) – XK02/FK02, F110, FK08", kind: "access", for: "A7", note: "Finance users" },
+    { id: "E4", code: "NFS-03", name: "F110 payment run calendar", kind: "calendar", for: "A5", note: "Sample week" },
+    { id: "E5", code: "NFS-04", name: "VCRF for the walkthrough sample, with the document check and SAP update", kind: "vcrf", for: "A4, A5, A7, A10", note: "Sample VCR-2026-0389" },
     { id: "E6", code: "NFS-05", name: "Weekly sensitive-field change report with sign-off", kind: "changes", for: "A5, A7, A8, A10", note: "Sample week (W38)" },
+    { id: "E7", code: "NFS-07", name: "Cancelled cheque attached to the VCRF", kind: "cheque", for: "A4, A10", note: "Scanned copy from DMS" },
   ];
+
 
   // ── RCM rows ────────────────────────────────────────────────────────────
   const riskId = ctl?.riskId || "R-P2P-02";

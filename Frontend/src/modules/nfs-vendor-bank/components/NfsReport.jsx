@@ -44,6 +44,8 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
   const { meta, control, summary, results, exceptions, rcm, sop, exposure, limitations, trace, reviewNotes, annotations } = result;
   const date = meta.testedAt.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
   const ok = summary.designEffective;
+  const L = result.labels || {};
+  const DOC = L.doc || "SOP";
   const logo = `${import.meta.env.BASE_URL}DeloitteLogo.png`;
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
   }, [onClose]);
 
   const print = () => {
-    document.title = `${meta.reference} Vendor Bank Change Design Test Report`;
+    document.title = `${meta.reference} ${L.reportTitle || "Vendor bank-detail change"} design test report`;
     window.print();
   };
 
@@ -88,7 +90,7 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
               Test of design (walkthrough sample)
             </span>
           </div>
-          <h1>Vendor bank-detail change – design testing report</h1>
+          <h1>{L.reportTitle || "Vendor bank-detail change"} – design testing report</h1>
           <div className="rp-sub">
             {meta.company} · {date}
           </div>
@@ -96,10 +98,10 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
           <div className="rp-grid">
             {[
               ["Workpaper ref", meta.reference],
-              ["Control", `${control.id} – Vendor bank-detail change control`],
+              ["Control", L.controlName || `${control.id} – Vendor bank-detail change control`],
               ["Process", `${control.process} › ${control.subProcess}`],
               ["Risk", control.riskId],
-              ["SOP", `${sop.docId} v${sop.version}`],
+              [DOC, `${sop.docId} v${sop.version}`],
               ["Sample", meta.sample],
               ["Walkthrough date", fmtDate(meta.walkthroughDate)],
               ["Control owner", control.owner],
@@ -153,20 +155,20 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
               ["Control description", control.description],
               ["Type / nature / frequency", `${control.type} · ${control.nature} · ${control.frequency}`],
               ["Assertion", control.assertion],
-              ["SOP", `${sop.name} – approved by ${sop.approvedBy} on ${fmtDate(sop.approvalDate)}`],
+              [DOC, `${sop.name} – approved by ${sop.approvedBy} on ${fmtDate(sop.approvalDate)}`],
             ]}
           />
 
           <h2>3. Risk and control matrix (generated)</h2>
           <Table
-            head={["Control ID", "Activity", "Type", "Frequency", "Performed by", "SOP", "Attributes", "Sample", "Design"]}
+            head={["Control ID", "Activity", "Type", "Frequency", "Performed by", DOC, "Attributes", "Sample", "Design"]}
             rows={rcm.rcmRows.map((r) => [r.controlId, r.activity, r.type, r.frequency, r.performer, r.sopRef, r.attributes, r.sample, <Badge key="d" value={r.design} />])}
           />
 
           <h2>4. Walkthrough and preliminary design read</h2>
-          <h3>Walkthrough agreed to the SOP</h3>
+          <h3>Walkthrough agreed to the {DOC}</h3>
           <Table head={["Check", "Result", "Detail"]} widths={["200px", "80px"]} rows={rcm.consistency.map((c) => [c.check, <Badge key="r" value={c.result} />, c.detail])} />
-          <h3>Preliminary design read of the SOP</h3>
+          <h3>Preliminary design read of the {DOC}</h3>
           <Table head={["Ref", "Attr", "Area", "Assessment", "Observation"]} widths={["40px", "40px", "140px", "90px"]} rows={rcm.design.map((d) => [d.id, d.attr, d.area, <Badge key="s" value={d.status === "Gap" ? d.severity : d.status} />, d.observation])} />
           <p className="rp-mut">Concluded by the test of design in section 5.</p>
 
@@ -200,7 +202,7 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
           ))}
 
           <h2>6. Walkthrough trace – {meta.sample}</h2>
-          <Table head={["Step", "SOP ref", "Designed step", "Evidence observed", "Transcript", "As designed?", "Note"]} rows={trace.map((t) => [t.step, t.sopRef, t.designed, t.observed, t.transcript, t.performed, t.note])} />
+          <Table head={["Step", `${DOC} ref`, "Designed step", "Evidence observed", L.walkthrough === "note" ? "Walkthrough note" : "Transcript", "As designed?", "Note"]} rows={trace.map((t) => [t.step, t.sopRef, t.designed, t.observed, t.transcript, t.performed, t.note])} />
 
           <h2>7. Design observations (draft for management response)</h2>
           {exceptions.length === 0 && <p>No design observations.</p>}

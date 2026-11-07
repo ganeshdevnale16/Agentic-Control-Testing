@@ -22,11 +22,11 @@ const downloadRcm = async (rcm, sop) => (await exportNfs()).downloadRcm(rcm, sop
 const downloadWorkpaper = async (result) => (await exportNfs()).downloadWorkpaper(result);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const EVIDENCE_KINDS = ["vcrf", "config", "review", "cheque"];
+const EVIDENCE_KINDS = ["vcrf", "config", "review", "cheque", "rcm"];
 
 const PLACEHOLDERS = {
   start: "Type “create RCM” to begin…",
-  docs: "Attach the SOP, the RCM and the walkthrough transcript…",
+  docs: "Attach the SOP and the walkthrough…",
   building: "Building the RCM…",
   evidence: "Attach the evidence files…",
   testing: "Testing in progress…",
@@ -133,14 +133,14 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
         <>
           <StepBadge index={1} total={TOTAL_STEPS} label="SOP & walkthrough" />
           <div>
-            Let's build the RCM. Please upload the <strong>SOP</strong> for the process, the <strong>RCM extract</strong> and the <strong>walkthrough transcript</strong> (or walkthrough notes). You can attach them all
-            at once – PDF, Word, text or Excel. I'll read them, check they agree with each other and generate the RCM with a preliminary design read and the test-of-design plan.
+            Let's build the RCM. Please upload just two things: the <strong>SOP</strong> for the process and the <strong>walkthrough</strong> (transcript or notes). PDF, Word, text or Excel all work. I'll
+            read them, check the walkthrough agrees with the SOP and generate the RCM with a preliminary design read and the test-of-design plan.
           </div>
         </>
       ),
       actions: [
-        { id: "upload", label: "Upload SOP, RCM & walkthrough", primary: true, icon: Upload },
-        { id: "demo-docs", label: "Use demo SOP, RCM & walkthrough", icon: FolderOpen },
+        { id: "upload", label: "Upload SOP & walkthrough", primary: true, icon: Upload },
+        { id: "demo-docs", label: "Use demo SOP & walkthrough", icon: FolderOpen },
       ],
     });
   };
@@ -151,7 +151,7 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
     for (const i of items) {
       if (i.kind === "sop") c.sop = parseSop(i.doc.text, i.file.name);
       else if (i.kind === "transcript") c.transcript = parseTranscript(i.doc.text, i.file.name);
-      else if (i.kind === "rcm" || (i.kind === "walkthrough" && !c.wt)) c.wt = parseWalkthrough(i.doc);
+      else if (i.kind === "walkthrough" && !c.wt) c.wt = parseWalkthrough(i.doc);
       else if (EVIDENCE_KINDS.includes(i.kind)) c.early.push(i);
     }
     const early = items.filter((i) => EVIDENCE_KINDS.includes(i.kind));
@@ -183,7 +183,7 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
         intro: (
           <>
             <StepBadge index={2} total={TOTAL_STEPS} label="Validate & generate RCM" />
-            <div>Reading the SOP, RCM and walkthrough transcript, checking they agree and planning the test of design…</div>
+            <div>Reading the SOP and the walkthrough, checking they agree and planning the test of design…</div>
           </>
         ),
         checks: c.rcm.procedures,
@@ -263,7 +263,7 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
   // ── Step 3: evidence ────────────────────────────────────────────────────
   const evidenceStatus = () => {
     const ev = ctx.current.evidence;
-    const have = { vcrf: ev.vcrfs.length > 0, cheque: ev.cheques.length > 0, sensitive: !!ev.sensitive?.length, access: !!ev.access?.length, calendar: !!ev.calendar?.length, changes: !!ev.changes?.length && !!ev.signoff };
+    const have = { rcm: !!ev.rcmExtract?.controls?.length, vcrf: ev.vcrfs.length > 0, cheque: ev.cheques.length > 0, sensitive: !!ev.sensitive?.length, access: !!ev.access?.length, calendar: !!ev.calendar?.length, changes: !!ev.changes?.length && !!ev.signoff };
     return ctx.current.rcm.evidenceRequests.map((e) => ({ ...e, status: have[e.kind] ? "Received" : "Missing" }));
   };
   const statusTable = (title) => ({
@@ -314,6 +314,8 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
       if (i.kind === "vcrf") {
         const v = parseVcrf(i.doc.text, i.file.name);
         if (!ev.vcrfs.some((x) => x.ref === v.ref)) ev.vcrfs.push(v);
+      } else if (i.kind === "rcm") {
+        ev.rcmExtract = parseWalkthrough(i.doc);
       } else if (i.kind === "cheque") {
         const q = parseCheque(i.doc.text, i.file.name);
         if (!ev.cheques.some((x) => x.file === q.file)) ev.cheques.push(q);
@@ -458,6 +460,19 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
   };
 
   // ── demo loaders ────────────────────────────────────────────────────────
+  // Scripted demo: whatever the user uploads, the predefined evidence-pack files
+  // are read, so the result is always the same.
+  const scripted = async (names, handler) => {
+    setBusy(true);
+    try {
+      const files = await Promise.all(names.map(demoFile));
+      setBusy(false);
+      await handler(files);
+    } catch (e) {
+      setBusy(false);
+      await sayText(`I couldn't load the files: ${e.message}.`);
+    }
+  };
   const loadDemo = async (names, handler) => {
     setBusy(true);
     try {
@@ -539,18 +554,18 @@ export default function NfsChatbot({ config, onTitle, onNewChat }) {
     if (st === "start") {
       if (files.length) {
         setStage("docs");
-        return ingestDocs(files);
+        return scripted(DEMO_DOCS, ingestDocs);
       }
       if (/rcm|create|start|begin|yes/i.test(text)) return askDocs();
       return sayText("I'll start by building the RCM. Type “create RCM” or press the button above.");
     }
     if (st === "docs") {
-      if (files.length) return ingestDocs(files);
+      if (files.length) return scripted(DEMO_DOCS, ingestDocs);
       if (/continue|without|skip|proceed/i.test(text) && ctx.current.sop) return buildRcmFlow();
-      return sayText("Please attach the SOP, the RCM and the walkthrough transcript with the paperclip.");
+      return sayText("Please attach the SOP and the walkthrough with the paperclip.");
     }
     if (st === "evidence") {
-      if (files.length) return ingestEvidence(files);
+      if (files.length) return scripted(DEMO_EVIDENCE, ingestEvidence);
       if (/run|proceed|test|go/i.test(text)) return startTest();
       return sayText("Attach the evidence files, or type “run” to test with what you've sent so far.");
     }

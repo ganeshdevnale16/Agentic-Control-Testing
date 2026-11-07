@@ -103,29 +103,31 @@ This is a scripted demo: any uploaded file gives the same result. Round 2 tests 
 
 # Module 3 – Non-FS Control Testing: Vendor bank-detail change (P2P-04) – test of design
 
-Flow (unchanged): **1** upload SOP, RCM and walkthrough transcript → **2** walkthrough checked against the SOP, RCM and
+Flow: **1** upload the **SOP and the walkthrough** (only these two) → **2** walkthrough checked against the SOP, RCM and
 test-of-design plan generated → **3** upload evidence → **4** test of design, observations, report and workpaper.
+
+**Scripted demo:** whatever files are uploaded, the tool reads the predefined files from the *Design Testing Evidence Pack v3*
+(`public/demo/nfs`), so the result is always the same and matches WP-P2P-04-TOD.
 
 ## What it tests (aligned to WP-P2P-04-TOD)
 Ten design attributes, each concluded Pass / Deficiency / Partial with tick marks (✓ ✗ ◐, T = corroborated in the transcript):
 A1 Risk linkage · A2 Policy governance · A3 Ownership and authority · A4 Precision and criteria · A5 Frequency and timing ·
 A6 System alignment · A7 Segregation of duties · A8 Information used (IPE) · A9 Exceptions and escalation · A10 Evidence of performance.
+43 annotations A{n}-{k} point to the exact text (PDF page) or cells (Excel range) – same refs, locations and highlights as the template.
 
-Every finding is an annotation **A{n}-{k}** pointing to the exact text (PDF page) or cells (Excel range) in the source,
-found by reading the files – e.g. A4-2: the cheque is in the name of *Sri Murugan Casting Works*, not the vendor *Sri Murugan Castings*.
-
-## Demo files (`public/demo/nfs`)
+## Demo files (`public/demo/nfs`, from the evidence pack)
 | Ref | File | Step |
 |---|---|---|
-| NFS-01 | SOP-FIN-012 v3.0 (5.3 = document check: letter and cheque attached) | 1 |
-| NFS-02 | RCM extract – P2P-04 | 1 |
+| NFS-01 | SOP-FIN-012 v3.0 | 1 |
 | NFS-06 | Walkthrough transcript 14-Oct-2026 | 1 |
+| NFS-02 | Existing RCM extract – P2P-04 | 3 |
 | NFS-03 | SAP sensitive fields, user access (SUIM), F110 calendar | 3 |
-| NFS-04 | VCRF VCR-2026-0389 with document check and sender email | 3 |
+| NFS-04 | VCRF VCR-2026-0389 | 3 |
 | NFS-05 | Weekly change report W38 with sign-off | 3 |
 | NFS-07 | Cancelled cheque (VCRF attachment 2) | 3 |
+| `Annotated_Evidence/` | The pack's annotated copies, zipped with the workpaper | – |
 
-## Workpaper (Excel) – same layout as WP-P2P-04-TOD
+## Workpaper – downloaded as a zip: WP-P2P-04-TOD_Design_Test_Workpaper.xlsx + Annotated_Evidence folder
 Cover · Legend · ToD Testing · Walkthrough Trace · Annotation Index (links to the annotated copy) · Observations (O1–O5, draft for
 management response) · Review & Sign-off (reviewer-agent notes RN-1… and human sign-off fields) · **Annotated Evidence** (each
 source page / sheet with highlights and A{n}-{k} tags, coloured by result) · RCM, evidence inputs and processing log.

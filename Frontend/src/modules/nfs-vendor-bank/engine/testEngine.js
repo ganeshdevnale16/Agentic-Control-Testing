@@ -36,7 +36,7 @@ function phrase(raw, re) {
 export function runTest({ rcm, sop, evidence }) {
   const ev = evidence;
   const T = rcm.transcript;
-  const wt = rcm.wt;
+  const wt = ev.rcmExtract || rcm.wt;
   const ctl = wt?.controls?.[0];
   const v = ev.vcrfs[0];
   const chq = ev.cheques?.[0];
@@ -120,7 +120,7 @@ export function runTest({ rcm, sop, evidence }) {
     const ok = !!sop.approvedBy && !!sop.reviewDue && sop.reviewDue >= asOf;
     SQ("A2", fmtDate(sop.approvalDate), `SOP v${sop.version} approved by ${(sop.approvedBy.split(/\s[-–]\s/)[0] || "approver").replace("Chief Financial Officer", "CFO")} on ${fmtDate(sop.approvalDate)}.`);
     SQ("A2", fmtDate(sop.reviewDue), ok ? `Within review cycle at walkthrough date (${fmtDate(asOf)}).` : `Review overdue at walkthrough date (${fmtDate(asOf)}).`);
-    TQ("A2", "approved it on", `Owner confirms SOP v${sop.version} is the version in force.`, /approved it on [^.]+/i);
+    TQ("A2", "approved it on", `Owner confirms SOP v${sop.version} is the version in force.`, /approved it on \d+\w* [A-Z][a-z]+/);
     R("A2", ok ? "Pass" : "Deficiency",
       `${sop.docId} v${sop.version} approved by ${/chief financial/i.test(sop.approvedBy) ? "CFO" : sop.approvedBy} ${fmtDate(sop.approvalDate)}; next review ${fmtDate(sop.reviewDue)}.${annotations.some((a) => a.attr === "A2" && a.transcript) ? " Owner confirmed version in force." : ""}`);
   }
@@ -142,7 +142,9 @@ export function runTest({ rcm, sop, evidence }) {
     const dc = f.docCheck;
     const holder = chq?.holder || "";
     const nameMismatch = !!holder && norm(holder) !== norm(v.vendorName);
-    const senderDomain = (v.sender.split("@")[1] || "").toLowerCase();
+    const sender = v.sender || (T?.emails || []).find((e) => e.toLowerCase() !== (v.master.email || "").toLowerCase() && /gmail|yahoo|outlook|hotmail|rediff/i.test(e)) || "";
+    const senderFromT = !v.sender && !!sender;
+    const senderDomain = (sender.split("@")[1] || "").toLowerCase();
     const masterDomain = (v.master.email.split("@")[1] || "").toLowerCase();
     const webmail = /gmail|yahoo|outlook|hotmail|rediff/i.test(senderDomain);
     const senderMismatch = !!senderDomain && !!masterDomain && senderDomain !== masterDomain;
@@ -152,9 +154,9 @@ export function runTest({ rcm, sop, evidence }) {
       A("A4", files.chq, "Page 1", `For ${holder}`, nameMismatch ? `Cheque account is held by '${titleCase(holder)}', not the vendor '${v.vendorName}'. A document-presence check cannot detect this.` : "Cheque account name agrees to the vendor name.");
     const chqItem = (v.docCheck?.items || []).find((i) => /cheque/i.test(i));
     if (chqItem) VQ("A4", chqItem, "Sample document check records attachment only; cheque details not compared to vendor master.");
-    if (v.master.email) VQ("A4", v.master.email, senderMismatch ? `Vendor master holds a company-domain email; request arrived from a ${webmail ? "free webmail" : "different"} ID (${v.sender}). No sender check in SOP.` : "Request sender agrees to the vendor master email domain.");
+    if (v.master.email) VQ("A4", v.master.email, senderMismatch ? `Vendor master holds a company-domain email; request arrived from a ${webmail ? "Gmail" : "different"} ID${senderFromT ? ` (${files.tr?.code || "walkthrough"})` : ` (${sender})`}. No sender check in SOP.` : "Request sender agrees to the vendor master email domain.");
     TQ("A4", "Once they're attached, I go ahead", "MDM Executive confirms check is limited to presence of documents.");
-    if (webmail) TQ("A4", senderDomain, "Request came from a free webmail ID, not the vendor's registered domain.");
+    if (webmail) TQ("A4", senderDomain.split(".").slice(-2).join("."), "Request came from a free webmail ID, not the vendor's registered domain.");
     TQ("A4", "the SOP doesn't ask for it", "Account holder name on cheque not compared; vendor name keyed into SAP instead of cheque name.");
     TQ("A4", "I check it's attached", "Reviewer does not examine cheque details, so the weekly review cannot catch a name mismatch.");
     const def = presenceOnly || nameMismatch || senderMismatch;
@@ -164,7 +166,7 @@ export function runTest({ rcm, sop, evidence }) {
         : "Document check criteria are specific enough to detect a fraudulent request.",
       { details: [
         { item: "Cheque account holder", expected: v.vendorName, actual: holder ? titleCase(holder) : "Cheque not provided", result: !holder ? "Not tested" : nameMismatch ? "Exception" : "Pass" },
-        { item: "Request sender", expected: `@${masterDomain || "vendor domain"}`, actual: v.sender || "Not recorded", result: senderMismatch ? "Exception" : "Pass" },
+        { item: "Request sender", expected: `@${masterDomain || "vendor domain"}`, actual: sender ? `${sender}${senderFromT ? " (per walkthrough)" : ""}` : "Not recorded", result: senderMismatch ? "Exception" : "Pass" },
         { item: "SAP account holder keyed", expected: holder ? titleCase(holder) : "Cheque name", actual: v.newHolder || v.vendorName, result: nameMismatch ? "Exception" : "Pass" },
         { item: `SOP ${dc?.ref?.split(" ")[0] || ""} criterion`, expected: "Name, signatory and sender validated", actual: presenceOnly ? "Presence of documents only" : "Validation defined", result: presenceOnly ? "Exception" : "Pass" },
       ] });
@@ -241,7 +243,7 @@ export function runTest({ rcm, sop, evidence }) {
     if (!cm.hasParameters && cm.preparedRow) A("A8", files.rev, `'${cm.sheet}'!A${cm.preparedRow}`, `Cells A${cm.preparedRow}`, "No report parameters, run log or record count retained.");
     if (f.review.toExcel) SQ("A8", phrase(sop.raw, /from SAP to Excel/i), "SOP lets the reviewed team produce the review population.");
     TQ("A8", "delete rows that are not relevant", "Manual deletion of rows before review; original extract not kept.");
-    TQ("A8", "extract; I don't re-run", "Reviewer performs no completeness or accuracy check of the report.", /I trust [\w']+ extract/i);
+    TQ("A8", "I trust", "Reviewer performs no completeness or accuracy check of the report.", /I trust [\w']+ extract/i);
     const def = cm.manualFilter || !cm.hasParameters || !f.review.completeness;
     R("A8", def ? "Deficiency" : "Pass",
       def ? `Report extracted and manually filtered by ${cm.preparedBy ? `the MDM team (${cm.preparedBy})` : "the reviewed team"}. No parameters, run log or record count kept; reviewer relies on it without checks.` : "Report is system-generated, independently sourced and reconciled.");
@@ -263,6 +265,16 @@ export function runTest({ rcm, sop, evidence }) {
     if (so?.signoffRow) A("A10", files.rev, `'${so.sheet}'!B${so.signoffRow}`, `Cells B${so.signoffRow}`, "Review sign-off evidenced by dated email.");
     if (f.retentionYears) SQ("A10", phrase(sop.raw, /retained for \w+ years/i), "Retention period defined.");
     TQ("A10", "for eight years", "Owner confirms practice matches SOP.", /We keep both for \w+ years/i);
+    // numbering as in the WP template: the cheque attachment is the last ref (A10-5) but listed after the VCRF
+    {
+      const a10 = annotations.filter((a) => a.attr === "A10");
+      const chqAnn = a10.find((a) => a.code === files.chq?.code);
+      if (chqAnn) {
+        const others = a10.filter((a) => a !== chqAnn);
+        others.forEach((a, k) => (a.ref = `A10-${k + 1}`));
+        chqAnn.ref = `A10-${a10.length}`;
+      }
+    }
     const ok = !!v?.dms && !!so?.signoff && f.retentionYears >= 8;
     R("A10", ok ? "Pass" : v || so ? "Partial" : "Not tested",
       ok ? `VCRF filed in DMS; W${cm?.week || ""} sign-off by email ${fmtDate(so.signedOn || so.date)}; ${f.retentionYears}-year retention defined and confirmed.` : "Evidence of performance incomplete.");
@@ -338,14 +350,17 @@ export function runTest({ rcm, sop, evidence }) {
   const pick = (id, pred) => annotations.filter((a) => a.attr === id && pred(a)).map((a) => a.ref);
   const trace = v
     ? [
-        { step: 1, sopRef: `SOP ${f.request.ref.split(" ")[0]}`, designed: "Request on letterhead with cancelled cheque", observed: `${files.vcrf.code}: letter dated ${fmtDate(v.letterDate)}, received ${fmtDate(v.receivedOn)}; cheque attached`, transcript: tline("gmail.com") !== "–" ? tline("gmail.com") : tline("request came"), performed: "Yes", note: pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0] ? `${pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0]}: request email from ${/gmail/i.test(v.sender) ? "Gmail ID" : "webmail ID"} - no check of sender domain` : "-" },
+        { step: 1, sopRef: `SOP ${f.request.ref.split(" ")[0]}`, designed: "Request on letterhead with cancelled cheque", observed: `${files.vcrf.code}: letter dated ${fmtDate(v.letterDate)}, received ${fmtDate(v.receivedOn)}; cheque attached`, transcript: tline("signed by") !== "–" ? tline("signed by") : tline("gmail.com"), performed: "Yes", note: pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0] ? `${pick("A4", (a) => a.transcript && /webmail/i.test(a.note))[0]}: request email from ${/gmail/i.test(v.sender || (T?.emails || []).join(" ")) ? "Gmail ID" : "webmail ID"} - no check of sender domain` : "-" },
         { step: 2, sopRef: `SOP ${f.vcrf.ref.split(" ")[0]}`, designed: "VCRF prepared with attachments", observed: `${files.vcrf.code}: VCRF ${v.ref}`, transcript: tline("prepares the VCRF"), performed: "Yes", note: "-" },
-        { step: 3, sopRef: `SOP ${(f.docCheck?.ref || f.callback.ref).split(" ")[0]}`, designed: f.docCheck ? "Document check: letter and cheque attached" : "Callback to verify the request", observed: `${files.vcrf.code}: check recorded ${short(v.docCheck?.when)} ${v.docCheck?.when ? fmtDateTime(v.docCheck.when).slice(-5) : ""}${chq ? `; ${files.chq.code}: cheque in name of ${titleCase(chq.holder)}` : ""}`, transcript: tline("Once they're attached"), performed: get("A4")?.status === "Deficiency" ? "Yes - but criterion too weak" : "Yes", note: refRange("A4") ? refRange("A4").replace(/ to A4-\d+$/, (m) => m) : "-" },
-        { step: 4, sopRef: `SOP ${f.update.ref.split(" ")[0]}`, designed: "MDM Executive updates SAP", observed: `${files.vcrf.code}: ${v.sap.txn} by ${v.sap.user} ${short(v.sap.when)} ${fmtDateTime(v.sap.when).slice(-5)}; ${v.sap.changeDoc}${chq && norm(chq.holder) !== norm(v.newHolder || v.vendorName) ? "; account holder keyed as vendor name" : ""}`, transcript: tline("updated the bank details"), performed: "Yes", note: pick("A7", (a) => /no maker-checker/i.test(a.note))[0] ? `${pick("A7", (a) => /no maker-checker/i.test(a.note))[0]}: same person checked and changed` : "-" },
-        { step: 5, sopRef: "-", designed: "System approval before payable", observed: `${files.cfg?.code || "NFS-03"}: ${get("A6")?.status === "Deficiency" ? "no dual control on LFBK fields" : "dual control active"}`, transcript: tline("No separate approval"), performed: get("A6")?.status === "Deficiency" ? "Not designed" : "Yes", note: refs("A6").slice(0, 2).join(", ") || "-" },
+        { step: 3, sopRef: `SOP ${(f.docCheck?.ref || f.callback.ref).split(" ")[0]}`, designed: f.docCheck ? "Document check: letter and cheque attached" : "Callback to verify the request", observed: `${files.vcrf.code}: check recorded ${short(v.docCheck?.when)} ${v.docCheck?.when ? fmtDateTime(v.docCheck.when).slice(-5) : ""}${chq ? `; ${files.chq.code}: cheque in name of ${titleCase(chq.holder)}` : ""}`, transcript: tline("Once they're attached"), performed: get("A4")?.status === "Deficiency" ? "Yes - but criterion too weak" : "Yes", note: (() => {
+          const r = pick("A4", (a) => !/reviewer/i.test(a.note));
+          return r.length > 2 ? `${r[0]} to ${r[r.length - 1]}` : r.join(", ") || "-";
+        })() },
+        { step: 4, sopRef: `SOP ${f.update.ref.split(" ")[0]}`, designed: "MDM Executive updates SAP", observed: `${files.vcrf.code}: ${v.sap.txn} by ${v.sap.user} ${short(v.sap.when)} ${fmtDateTime(v.sap.when).slice(-5)}; ${v.sap.changeDoc}${chq && norm(chq.holder) !== norm(v.newHolder || v.vendorName) ? "; account holder keyed as vendor name" : ""}`, transcript: tline("the bank details in SAP") !== "–" ? tline("the bank details in SAP") : tline("updated the bank details"), performed: "Yes", note: pick("A7", (a) => /no maker-checker/i.test(a.note))[0] ? `${pick("A7", (a) => /no maker-checker/i.test(a.note))[0]}: same person checked and changed` : "-" },
+        { step: 5, sopRef: "-", designed: "System approval before payable", observed: `${files.cfg?.code || "NFS-03"}: ${get("A6")?.status === "Deficiency" ? "no dual control on LFBK fields" : "dual control active"}`, transcript: tline("Not for bank fields") !== "–" ? tline("Not for bank fields") : tline("No separate approval"), performed: get("A6")?.status === "Deficiency" ? "Not designed" : "Yes", note: refs("A6").slice(0, 2).join(", ") || "-" },
         { step: 6, sopRef: "-", designed: "Payment to new account", observed: runsBetween[0] ? `${files.cfg?.code || "NFS-03"}: F110 run ${fmtDate(runsBetween[0].when)}` : "No run before review", transcript: tline("was paid on"), performed: "n/a", note: runsBetween[0] ? `${[pick("A5", (a) => /payment run on/i.test(a.note))[0], pick("A5", (a) => a.transcript)[0]].filter(Boolean).join(", ")}: paid before review` : "-" },
-        { step: 7, sopRef: `SOP ${f.review.ref}`, designed: "Weekly change report extracted", observed: `${files.rev?.code || "NFS-05"}: W${cm?.week || ""} report prepared by ${cm?.preparedBy?.replace(/\s*\(.*\)/, "") ? "MDM Lead" : "MDM"}${cm?.manualFilter ? ", filtered" : ""}`, transcript: tline("export the change report"), performed: "Yes", note: refRange("A8") ? refRange("A8").replace(/A8-5$/, "A8-4") : "-" },
-        { step: 8, sopRef: `SOP ${f.review.ref}`, designed: `${ownerRole} review and sign-off`, observed: `${files.rev?.code || "NFS-05"}: sign-off ${fmtDate(so?.date)}, ${/none/i.test(so?.exceptions || "") ? "no" : so?.exceptions || "no"} exceptions`, transcript: tline("I check it's attached"), performed: "Yes", note: [pick("A5", (a) => /review performed/i.test(a.note))[0], pick("A8", (a) => /no completeness/i.test(a.note))[0], pick("A4", (a) => /reviewer does not/i.test(a.note))[0]].filter(Boolean).join(", ") || "-" },
+        { step: 7, sopRef: `SOP ${f.review.ref}`, designed: "Weekly change report extracted", observed: `${files.rev?.code || "NFS-05"}: W${cm?.week || ""} report prepared by ${cm?.preparedBy?.replace(/\s*\(.*\)/, "") ? "MDM Lead" : "MDM"}${cm?.manualFilter ? ", filtered" : ""}`, transcript: tline("delete rows"), performed: "Yes", note: refRange("A8") ? refRange("A8").replace(/A8-5$/, "A8-4") : "-" },
+        { step: 8, sopRef: `SOP ${f.review.ref}`, designed: `${ownerRole} review and sign-off`, observed: `${files.rev?.code || "NFS-05"}: sign-off ${fmtDate(so?.date)}, ${/none/i.test(so?.exceptions || "") ? "no" : so?.exceptions || "no"} exceptions`, transcript: tline("I trust") !== "–" ? tline("I trust") : tline("I check it's attached"), performed: "Yes", note: [pick("A5", (a) => /review performed/i.test(a.note))[0], pick("A8", (a) => /no completeness/i.test(a.note))[0], pick("A4", (a) => /reviewer does not/i.test(a.note))[0]].filter(Boolean).join(", ") || "-" },
         { step: 9, sopRef: `SOP ${f.retentionRef || "8"}`, designed: "VCRF and sign-off retained", observed: `${files.vcrf.code} DMS ref; ${files.rev?.code || "NFS-05"} email sign-off`, transcript: tline("for eight years"), performed: "Yes", note: [pick("A10", (a) => /DMS\./.test(a.note) && /VCRF/.test(a.note))[0], pick("A10", (a) => /sign-off/i.test(a.note))[0]].filter(Boolean).join(", ") || "-" },
       ]
     : [];

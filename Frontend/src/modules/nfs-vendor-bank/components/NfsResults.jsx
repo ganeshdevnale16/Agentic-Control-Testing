@@ -176,7 +176,7 @@ export default function NfsResults({ result, onOpenReport, onDownloadExcel, onDo
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 6 }}>Tick marks: ✓ agreed to source · ✗ exception / design gap · ◐ partially meets criterion · T corroborated in the walkthrough transcript</div>
+      <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 6 }}>Tick marks: ✓ agreed to source · ✗ exception / design gap · ◐ partially meets criterion · T corroborated in the walkthrough {result.labels?.walkthrough || "transcript"}</div>
 
       {exceptions.length > 0 && (
         <>
@@ -189,10 +189,10 @@ export default function NfsResults({ result, onOpenReport, onDownloadExcel, onDo
 
       {trace.length > 0 && (
         <>
-          <Section note="Each step of the sample traced from the SOP to the evidence and the transcript.">Walkthrough trace – {meta.sample}</Section>
+          <Section note={`Each step of the sample traced from the ${result.labels?.doc || "SOP"} to the evidence and the walkthrough ${result.labels?.walkthrough || "transcript"}.`}>Walkthrough trace – {meta.sample}</Section>
           <SimpleTable
             minWidth={820}
-            head={["Step", "SOP ref", "Designed step", "Evidence observed", "Transcript", "As designed?", "Annotation / note"]}
+            head={["Step", `${result.labels?.doc || "SOP"} ref`, "Designed step", "Evidence observed", result.labels?.walkthrough === "note" ? "Walkthrough note" : "Transcript", "As designed?", "Annotation / note"]}
             rows={trace.map((t) => [t.step, t.sopRef, t.designed, t.observed, t.transcript, <Badge key="p" value={t.performed} />, t.note])}
           />
         </>
