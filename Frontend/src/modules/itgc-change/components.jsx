@@ -157,7 +157,7 @@ function PrimaryButton({ disabled, onClick, children }) {
 // the issue is, and re-testing restarts from that phase (not from evidence).
 export const PHASES = [
   { id: "rcm", label: "RCM", hint: "Control details or attributes are wrong – the RCM has to be uploaded again." },
-  { id: "population", label: "Population & IPE", hint: "Population source or IPE is not adequate – the population is obtained again." },
+  { id: "population", label: "Population & IPE", hint: "Population source or IPE is Not effective – the population is obtained again." },
   { id: "samples", label: "Samples", hint: "Sample selection is not acceptable – samples are selected again." },
   { id: "evidence", label: "Evidence & testing", hint: "Evidence is missing or testing is wrong – evidence is provided and samples re-tested." },
 ];

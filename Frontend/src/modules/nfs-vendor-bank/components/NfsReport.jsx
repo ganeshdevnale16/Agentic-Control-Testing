@@ -178,7 +178,7 @@ export default function NfsReport({ result, onClose, onDownloadExcel }) {
           <h3>Walkthrough agreed to the {DOC}</h3>
           <Table head={["Check", "Result", "Detail"]} widths={["200px", "80px"]} rows={rcm.consistency.map((c) => [c.check, <Badge key="r" value={c.result} />, c.detail])} />
           <h3>Preliminary design read of the {DOC}</h3>
-          <Table head={["Ref", "Attr", "Area", "Assessment", "Observation"]} widths={["40px", "40px", "140px", "90px"]} rows={rcm.design.map((d) => [d.id, d.attr, d.area, <Badge key="s" value={d.status === "Not adequate" ? `${d.status} (${d.severity})` : d.status} />, d.observation])} />
+          <Table head={["Ref", "Attr", "Area", "Assessment", "Observation"]} widths={["40px", "40px", "140px", "90px"]} rows={rcm.design.map((d) => [d.id, d.attr, d.area, <Badge key="s" value={d.status === "Not effective" ? `${d.status} (${d.severity})` : d.status} />, d.observation])} />
           <p className="rp-mut">Concluded by the test of design in section 5.</p>
 
           <h2>5. Test of design by attribute</h2>

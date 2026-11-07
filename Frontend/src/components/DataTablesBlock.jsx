@@ -28,7 +28,7 @@ const BADGE_COLORS = {
   "to test": { bg: "#E3F1CC", fg: "#26890D" },
   "no exception": { bg: "#dcfce7", fg: "#166534" },
   "not fully tested": { bg: "#ffedd5", fg: "#9a3412" },
-  "not adequate": { bg: "#fee2e2", fg: "#991b1b" },
+  "Not effective": { bg: "#fee2e2", fg: "#991b1b" },
   deficiency: { bg: "#fee2e2", fg: "#991b1b" },
   partial: { bg: "#ffedd5", fg: "#9a3412" },
   closed: { bg: "#dcfce7", fg: "#166534" },
