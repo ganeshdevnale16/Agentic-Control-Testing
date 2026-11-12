@@ -30,6 +30,7 @@ export default function Workspace({ config, onBack }) {
       <Sidebar
         moduleTitle={config.menu.title}
         accent={config.menu.accent}
+        platformUrl={config.platformUrl}
         onBack={onBack}
         sessions={sessions}
         activeId={activeId}

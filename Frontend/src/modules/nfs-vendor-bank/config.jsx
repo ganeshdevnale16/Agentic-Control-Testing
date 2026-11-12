@@ -3,8 +3,9 @@ import NfsChatbot from "./NfsChatbot";
 export const nfsVendorBankModule = {
   id: "nfs-vendor-bank",
   Chat: NfsChatbot,
+  platformUrl: "https://www.figma.com/proto/XXTWaqp4Vl82lbR22SL9XW/FUTURE-OF-CONTROLS?node-id=301-1510&t=mj7wpfJNODnqaAK0-1",
   menu: {
-    title: "Non-FS Control Testing – Vendor Bank-Detail Change",
+    title: "Design Effectiveness Testing",
     tagline: "Builds the RCM from your SOP and walkthrough, then tests the design of the control with annotated evidence",
     badge: "Non-FS · Procure-to-Pay",
     accent: "#0D8390",

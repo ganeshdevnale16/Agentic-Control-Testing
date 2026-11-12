@@ -1,6 +1,6 @@
-import { ArrowLeft, MessageSquare, Plus } from "lucide-react";
+import { ArrowLeft, ExternalLink, MessageSquare, Plus } from "lucide-react";
 
-export default function Sidebar({ moduleTitle, accent = "#86BC25", onBack, sessions = [], activeId, onSelect, onNew }) {
+export default function Sidebar({ moduleTitle, accent = "#86BC25", platformUrl, onBack, sessions = [], activeId, onSelect, onNew }) {
   return (
     <div style={{ width: 260, backgroundColor: "#ffffff", borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
       {onBack && (
@@ -64,7 +64,19 @@ export default function Sidebar({ moduleTitle, accent = "#86BC25", onBack, sessi
             );
           })}
       </div>
-      <div style={{ padding: 16, borderTop: "1px solid #e2e8f0", fontSize: 12, color: "#94a3b8" }}>Powered by AI</div>
+      {platformUrl && (
+        <div style={{ padding: "12px 12px 0" }}>
+          <a
+            href={platformUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, background: "#000000", color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none" }}
+          >
+            Platform <ExternalLink size={13} />
+          </a>
+        </div>
+      )}
+      <div style={{ padding: 16, borderTop: platformUrl ? "none" : "1px solid #e2e8f0", fontSize: 12, color: "#94a3b8" }}>Powered by AI</div>
     </div>
   );
 }
