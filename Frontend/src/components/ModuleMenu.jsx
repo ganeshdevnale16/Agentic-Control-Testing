@@ -7,40 +7,40 @@ export default function ModuleMenu({ modules, onSelect }) {
         height: "100%",
         overflowY: "auto",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         background: "#f0f2f5",
         fontFamily: "inherit",
-        padding: 24,
+        padding: "20px 24px",
+        boxSizing: "border-box",
       }}
     >
-      <div style={{ width: "100%", maxWidth: 860 }}>
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
+      {/* margin: auto centres the content but still lets the page scroll to the top on small screens */}
+      <div style={{ width: "100%", maxWidth: 900, margin: "auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
           <div
             style={{
-              width: 48,
-              height: 48,
-              borderRadius: 14,
+              width: 40,
+              height: 40,
+              borderRadius: 12,
               background: "#000000",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              margin: "0 auto 16px",
+              margin: "0 auto 10px",
             }}
           >
-            <Bot size={24} color="#fff" />
+            <Bot size={20} color="#fff" />
           </div>
           <h1
             style={{
-              fontSize: 22,
+              fontSize: 20,
               fontWeight: 700,
               color: "#000000",
-              margin: "0 0 6px",
+              margin: "0 0 4px",
             }}
           >
             Control Testing Assistants
           </h1>
-          <p style={{ fontSize: 14, color: "#64748b", margin: 0 }}>
+          <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>
             Choose which assistant you'd like to open.
           </p>
         </div>
@@ -48,8 +48,8 @@ export default function ModuleMenu({ modules, onSelect }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 16,
+            gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+            gap: 14,
           }}
         >
           {modules.map((mod) => {
@@ -65,12 +65,13 @@ export default function ModuleMenu({ modules, onSelect }) {
                   textAlign: "left",
                   background: disabled ? "#fafbfc" : "#ffffff",
                   border: `1px solid ${disabled ? "#eef2f6" : "#e2e8f0"}`,
-                  borderRadius: 16,
-                  padding: 22,
+                  borderRadius: 14,
+                  padding: "16px 20px",
                   cursor: disabled ? "default" : "pointer",
                   display: "flex",
                   flexDirection: "column",
-                  gap: 14,
+                  gap: 10,
+                  fontFamily: "inherit",
                   opacity: disabled ? 0.7 : 1,
                   transition: "border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease",
                 }}
@@ -89,9 +90,9 @@ export default function ModuleMenu({ modules, onSelect }) {
               >
                 <div
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 9,
                     background: accent,
                     display: "flex",
                     alignItems: "center",
@@ -101,7 +102,7 @@ export default function ModuleMenu({ modules, onSelect }) {
                   {disabled ? (
                     <Clock size={17} color="#fff" />
                   ) : (
-                    <Bot size={18} color="#fff" />
+                    <Bot size={16} color="#fff" />
                   )}
                 </div>
 
@@ -118,7 +119,7 @@ export default function ModuleMenu({ modules, onSelect }) {
                         background: `${accent}14`,
                         borderRadius: 99,
                         padding: "3px 9px",
-                        marginBottom: 8,
+                        marginBottom: 6,
                       }}
                     >
                       {mod.menu.badge}
@@ -126,10 +127,10 @@ export default function ModuleMenu({ modules, onSelect }) {
                   )}
                   <h2
                     style={{
-                      fontSize: 15.5,
+                      fontSize: 15,
                       fontWeight: 600,
                       color: disabled ? "#64748b" : "#000000",
-                      margin: "0 0 6px",
+                      margin: "0 0 4px",
                       lineHeight: 1.35,
                     }}
                   >
@@ -137,10 +138,10 @@ export default function ModuleMenu({ modules, onSelect }) {
                   </h2>
                   <p
                     style={{
-                      fontSize: 13,
+                      fontSize: 12.5,
                       color: "#94a3b8",
                       margin: 0,
-                      lineHeight: 1.55,
+                      lineHeight: 1.5,
                     }}
                   >
                     {mod.menu.tagline}
@@ -156,7 +157,7 @@ export default function ModuleMenu({ modules, onSelect }) {
                       fontSize: 12.5,
                       fontWeight: 600,
                       color: accent,
-                      marginTop: 4,
+                      marginTop: "auto",
                     }}
                   >
                     Open assistant <ArrowRight size={13} />
