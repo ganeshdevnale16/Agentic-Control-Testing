@@ -56,14 +56,14 @@ export const SOURCE_OPTIONS = [
     id: "actt",
     Icon: Cloud,
     title: "Pull from ACTT",
-    lines: ["I pull the E070 / STMS transport population for CIP client 500 through ACTT.", "System-generated, so IPE reliance is placed on ACTT."],
+    lines: ["I pull the E070 / STMS transport request population for CIP client 500 through ACTT and map change types from SNOW.", "System-generated, so IPE reliance is placed on ACTT."],
     tag: "Recommended",
   },
   {
     id: "manual",
     Icon: FileSpreadsheet,
     title: "Upload manually",
-    lines: ["You upload the population file (E070 and STMS extracts) with screenshots.", "I run the full IPE validation: completeness, accuracy and screenshot checks."],
+    lines: ["You upload the population file (E070, STMS and SNOW change request extracts) with screenshots.", "I run the full IPE validation: completeness, accuracy and screenshot checks."],
   },
 ];
 
@@ -228,7 +228,7 @@ function ReviewerDecisionForm({ onSubmit }) {
         rows={3}
         value={comment}
         onChange={(e) => setComment(e.target.value)}
-        placeholder={rejecting ? "e.g. CIDK905611 was not tested – obtain the ticket history and re-perform testing." : "Add a comment…"}
+        placeholder={rejecting ? "e.g. CIDK905611 was not tested – obtain the SNOW change request record and re-perform testing." : "Add a comment…"}
         style={{ ...fieldStyle, marginBottom: 12 }}
       />
       <PrimaryButton
@@ -376,7 +376,7 @@ function OwnerResponseForm({ phase, onSubmit }) {
         rows={3}
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder={decision === "Rejected" ? "Explain why the observation does not apply…" : "e.g. Ticket history attached – please re-test."}
+        placeholder={decision === "Rejected" ? "Explain why the observation does not apply…" : "e.g. SNOW change request record attached – please re-test."}
         style={{ ...fieldStyle, marginBottom: 10 }}
       />
       <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 6 }}>Reference documents</label>

@@ -59,12 +59,23 @@ same shape: `{ host, system, date, state, param, value }`. Never call SAP direct
 
 Opens from the module menu. Deloitte theme (black / Deloitte green #86BC25, Open Sans) is applied app-wide.
 
+## Terminology
+| Term | Meaning / source |
+|---|---|
+| SNOW change request | ServiceNow change record (CHG…) – requestor, assignee, state, justification, change tasks, approvals, back-out plan |
+| Solman request | SAP Solution Manager (ChaRM) request (6… / 7…) linked to the SNOW change request |
+| Transport request | SAP transport (CIDK…) – E070 / STMS |
+| Developer / Implementer | Transport owner / user who imported the transport into production |
+| Change types | **Normal**, **Standard (pre-approved)**, **Emergency** – per the client change policy; each has its own criteria |
+
 ## Flow (Tester view)
-1. **RCM** – upload the Risk & Control Matrix; the tool shows a detailed Control Summary (ID, objective, risk, description, nature, frequency, key, owner, systems, test approach, test attributes).
-2. **Population** – **Pull from ACTT** (IPE passed on reliance on the ACTT population) or **Upload manually** (full IPE: 11 checks).
-3. **Samples** – upload a Selected Samples file or random selection.
-4. **Evidence** – ticket history PDFs and approval emails; every sample is tested against attributes A1–A4.
-5. **Results** – verdict, per-sample results, attribute summary, exceptions, improvement opportunities, annotated evidence preview,
+1. **RCM** – upload the Risk & Control Matrix; the tool shows a Control Summary (ID, objective, risk, description, nature, frequency – event based, key, owner, systems, testing method, test approach) and the **testing criteria by change type**.
+2. **Population** – **Pull from ACTT** (IPE passed on reliance on the ACTT population) or **Upload manually** (full IPE: 11 checks). Change type is mapped to every transport from the SNOW change request extract.
+3. **Samples** – upload a Selected Samples file, or select per the client sampling methodology (`SAMPLING` in `data/demo.js`): random, stratified by change type, at least 2 per type.
+4. **Evidence** – SNOW change request records, test evidence and approval evidence by change type; every sample is tested against attributes A1–A5 using only the criteria for its change type.
+   - A1 Change request raised & justified · A2 Tested before deployment · A3 Test results evidenced · A4 Authorised for deployment (incl. back-out plan) · A5 Segregation of duties
+   - **N/A** is used where the change type does not need testing (e.g. a standard catalogue item); the reason is recorded.
+5. **Results** – verdict, test procedures performed, per-sample results, attribute summary (√ / X / N/A / NT), exceptions, improvement opportunities, annotated evidence preview,
    an exception summary with one bullet per sample, and **Review**.
 
 ## Reviewer and control owner workflow
@@ -84,8 +95,9 @@ Three tabs at the top of the module: **Tester view**, **Reviewer view**, **Contr
 5. **Owner rejects** → no re-test. The reason and documents are shown to the reviewer in the Reviewer view (review history) and the results come back to the reviewer to review again.
 
 ## Work paper (own format)
-Summary (incl. one-line exception summary per sample) · RCM & Attributes (incl. attribute summary) · Population & IPE ·
-Sample Testing · Evidence (annotated screenshots per sample) · Exceptions · Improvement Opportunities · Review Log
+Summary (engagement details, **test procedures performed** – testing method, IPE, population, sampling, number of samples, attributes, conclusion –
+and a one-line exception summary per sample) · RCM & Attributes (incl. criteria by change type and attribute summary) · Population & IPE (incl. change type split) ·
+Sample Testing · Evidence (3 annotated screenshots per sample: SNOW change request, SNOW change tasks & approvals, STMS import history) · Exceptions · Improvement Opportunities · Review Log
 (reviewer decision, **phase flagged**, observation, owner response, notes, reference documents).
 
 This is a scripted demo: any uploaded file gives the same result. Round 2 tests the sample that was missing evidence in round 1.

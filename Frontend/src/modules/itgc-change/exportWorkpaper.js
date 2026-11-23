@@ -1,11 +1,13 @@
 // Testing Work Paper – Agentic Controls Testing format (Deloitte styling).
+// Field names say which system each value comes from: SNOW change request (ServiceNow),
+// Solman request (Solution Manager), Transport request (SAP / STMS).
 // Sheets: Summary · RCM & Attributes · Population & IPE · Sample Testing ·
 // Evidence (annotated screenshots) · Exceptions · Improvement Opportunities · Review Log
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import {
-  ACTT_IPE_STATEMENT, ATTRIBUTES, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM,
-  attributeSummary, evidenceRefs, sampleSummary, stats, testingPerformed,
+  ACTT_IPE_STATEMENT, ATTRIBUTES, CHANGE_TYPES, CRITERIA, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM, TYPE_MAPPING_STATEMENT,
+  approvalText, attributeSummary, evidenceRefs, isEmergency, sampleSummary, stats, testProcedures, testingPerformed, typeLabel, typeSplit,
 } from "./data/demo";
 import { evidenceImagesFor } from "./evidenceImages";
 
@@ -73,6 +75,8 @@ function kv(ws, r, label, value, lastCol, height) {
 
 const resultFill = (s) => (s.result === "Pass" ? PASS : s.result === "Missing" ? WARN : FAIL);
 const resultText = (s) => (s.result === "Pass" ? "PASS" : s.result === "Missing" ? "NOT TESTED" : "FAIL");
+const markColor = (a) => (a === "X" ? "FFC00000" : a === "N/A" ? "FF3A6EA5" : BLACK);
+const NA_BG = "FFEEF4FB";
 const today = () => new Date().toLocaleDateString("en-GB").replace(/\//g, ".");
 
 // ── 1. Summary ──────────────────────────────────────────────────────────────
@@ -85,12 +89,27 @@ function summarySheet(wb, d) {
   r = kv(ws, r, "Control", `${RCM.controlId} – ${RCM.name}`, L);
   r = kv(ws, r, "In-scope period", RCM.period, L);
   r = kv(ws, r, "Environment", RCM.environment, L);
-  r = kv(ws, r, "Population source", d.source === "actt" ? "Pulled from ACTT (system-generated)" : "Uploaded by the engagement team (E070 / STMS extracts)", L);
+  r = kv(ws, r, "Population source", d.source === "actt" ? "Pulled from ACTT (system-generated); change type mapped from the SNOW change request extract" : "Uploaded by the engagement team (E070 / STMS and SNOW change request extracts)", L);
   r = kv(ws, r, "Sample selection", d.sampleMethod, L, 28);
+  r = kv(ws, r, "Testing method", RCM.testingMethod, L);
   r = kv(ws, r, "Testing round", d.round > 1 ? `Round ${d.round} (re-performed from ${PHASE_LABEL[[...d.reviews].reverse().find((v) => v.decision === "Rejected" && v.owner?.decision === "Accepted")?.phase] || "evidence"} after the control owner accepted the reviewer observation)` : "Round 1", L, d.round > 1 ? 28 : undefined);
   r = kv(ws, r, "Prepared by / date", `Agentic Controls Testing (AI-assisted) · ${today()}`, L);
   const last = d.reviews[d.reviews.length - 1];
   r = kv(ws, r, "Review status", last ? `${last.decision} by reviewer on ${last.date}${last.owner ? ` · owner ${last.owner.decision.toLowerCase()} the observation` : ""}` : "Not yet reviewed", L);
+
+  // Test procedures performed – IPE, population, sampling, samples, attributes, conclusion
+  r = section(ws, r + 1, "Test procedures performed", L);
+  headerRow(ws, r, ["Area", "Procedure performed / result", "", "", "", ""]);
+  ws.mergeCells(r, 2, r, L);
+  r++;
+  testProcedures(d).forEach((p) => {
+    cell(ws, r, 1, p.step, { bold: true, bg: GREY, border: true, size: 9.5 });
+    ws.mergeCells(r, 2, r, L);
+    cell(ws, r, 2, p.detail, { border: true });
+    for (let c = 2; c <= L; c++) ws.getCell(r, c).border = BOX;
+    ws.getRow(r).height = Math.max(20, Math.ceil(p.detail.length / 110) * 14 + 6);
+    r++;
+  });
 
   r = section(ws, r + 1, "Conclusion", L);
   const st = stats(d.samples);
@@ -115,8 +134,8 @@ function summarySheet(wb, d) {
 
 // ── 2. RCM & Attributes ─────────────────────────────────────────────────────
 function rcmSheet(wb, d) {
-  const L = 7;
-  const ws = sheet(wb, "RCM & Attributes", [28, 30, 12, 12, 12, 18, 44]);
+  const L = 9;
+  const ws = sheet(wb, "RCM & Attributes", [26, 34, 9, 7, 7, 7, 7, 22, 46]);
   banner(ws, "RCM & control attributes", "Control details as read from the uploaded Risk & Control Matrix", L);
   let r = section(ws, 5, "Control summary", L);
   [
@@ -129,11 +148,12 @@ function rcmSheet(wb, d) {
     ["Key control", RCM.key],
     ["Control owner", RCM.owner],
     ["Systems", RCM.systems],
-    ["Test approach", RCM.testApproach],
+    ["Testing method", RCM.testingMethod],
+    ["Test approach", RCM.testApproach, 30],
   ].forEach(([l, v, h]) => (r = kv(ws, r, l, v, L, h)));
 
   r = section(ws, r + 1, "List of control attributes", L);
-  headerRow(ws, r, ["#", "Attribute", "", "", "", "", ""]);
+  headerRow(ws, r, ["#", "Attribute", "", "", "", "", "", "", ""]);
   ws.mergeCells(r, 2, r, L);
   r++;
   ATTRIBUTES.forEach((a, i) => {
@@ -144,8 +164,28 @@ function rcmSheet(wb, d) {
     r++;
   });
 
+  // Criteria by change type – each sample is tested only against its own type's criteria
+  r = section(ws, r + 1, "Testing criteria by change type (per the client change policy)", L);
+  const spans = [[2, 2], [3, 7], [8, 9]];
+  headerRow(ws, r, ["Attribute", ...Array(L - 1).fill("")]);
+  CHANGE_TYPES.forEach((t, i) => {
+    ws.mergeCells(r, spans[i][0], r, spans[i][1]);
+    cell(ws, r, spans[i][0], t === "Standard" ? "Standard (pre-approved)" : t, { bold: true, color: WHITE, bg: BLACK, border: true, valign: "middle", size: 9.5 });
+  });
+  r++;
+  CRITERIA.forEach((c, k) => {
+    cell(ws, r, 1, `A${k + 1} – ${ATTRIBUTES[k].short}`, { bold: true, border: true });
+    CHANGE_TYPES.forEach((t, i) => {
+      ws.mergeCells(r, spans[i][0], r, spans[i][1]);
+      cell(ws, r, spans[i][0], c[t], { border: true });
+      for (let col = spans[i][0]; col <= spans[i][1]; col++) ws.getCell(r, col).border = BOX;
+    });
+    ws.getRow(r).height = 54;
+    r++;
+  });
+
   r = section(ws, r + 1, "Attribute summary", L);
-  headerRow(ws, r, ["Attribute", "Description", "Tested", "√", "X", "Conclusion", "Comment"]);
+  headerRow(ws, r, ["Attribute", "Description", "Tested", "√", "X", "N/A", "NT", "Conclusion", "Comment"]);
   r++;
   attributeSummary(d.samples).forEach((a) => {
     cell(ws, r, 1, `Attribute ${a.n}`, { bold: true, border: true });
@@ -153,35 +193,38 @@ function rcmSheet(wb, d) {
     cell(ws, r, 3, a.tested, { border: true, align: "center" });
     cell(ws, r, 4, a.ok, { border: true, align: "center" });
     cell(ws, r, 5, a.x, { border: true, align: "center", bold: !!a.x, color: a.x ? "FFC00000" : BLACK });
-    cell(ws, r, 6, a.conclusion, { border: true, bold: true, bg: a.x ? FAIL : a.nt ? WARN : PASS });
-    cell(ws, r, 7, a.comment, { border: true });
-    ws.getRow(r).height = 28;
+    cell(ws, r, 6, a.na, { border: true, align: "center" });
+    cell(ws, r, 7, a.nt, { border: true, align: "center" });
+    cell(ws, r, 8, a.conclusion, { border: true, bold: true, bg: a.x ? FAIL : a.nt ? WARN : PASS });
+    cell(ws, r, 9, a.comment, { border: true });
+    ws.getRow(r).height = 40;
     r++;
   });
 
   r = section(ws, r + 1, "Legend", L);
-  [["√", "No exception found"], ["X", "Exception found"], ["NT", "Not tested"]].forEach(([t, dsc]) => {
+  [["√", "No exception found"], ["X", "Exception found"], ["N/A", "Not applicable for the change type – reason recorded in the testing performed"], ["NT", "Not tested"]].forEach(([t, dsc]) => {
     cell(ws, r, 1, t, { bold: true, border: true, align: "center" });
-    ws.mergeCells(r, 2, r, 3);
+    ws.mergeCells(r, 2, r, L);
     cell(ws, r, 2, dsc, { border: true });
-    ws.getCell(r, 3).border = BOX;
+    for (let c = 3; c <= L; c++) ws.getCell(r, c).border = BOX;
     r++;
   });
 }
 
 // ── 3. Population & IPE ─────────────────────────────────────────────────────
 function populationSheet(wb, d) {
-  const L = 7;
-  const ws = sheet(wb, "Population & IPE", [18, 60, 26, 14, 14, 14, 14]);
-  banner(ws, "Population & IPE validation", `${POPULATION.transports} transports · ${POPULATION.period}`, L);
+  const L = 8;
+  const ws = sheet(wb, "Population & IPE", [18, 56, 24, 12, 12, 18, 22, 13]);
+  banner(ws, "Population & IPE validation", `${POPULATION.transports} transport requests · ${POPULATION.period}`, L);
   let r = section(ws, 5, "Population", L);
-  r = kv(ws, r, "Source", d.source === "actt" ? "ACTT – system-generated extract from CIP, client 500" : "Manual upload – E070 and STMS_IMPORT extracts with screenshots", L);
-  r = kv(ws, r, "Transports", `${POPULATION.transports} (STMS matched ${POPULATION.stmsMatched}, unique owners ${POPULATION.owners}, unique CRs ${POPULATION.uniqueCRs})`, L);
-  r = kv(ws, r, "Landscape", `Transport target ${POPULATION.target} · TR prefix ${POPULATION.prefix}`, L);
+  r = kv(ws, r, "Source", d.source === "actt" ? "ACTT – system-generated extract from CIP, client 500; change type from the SNOW change request extract" : "Manual upload – E070, STMS_IMPORT and SNOW change request extracts with screenshots", L);
+  r = kv(ws, r, "Transport requests", `${POPULATION.transports} (STMS matched ${POPULATION.stmsMatched}, unique developers ${POPULATION.owners}, unique Solman requests ${POPULATION.uniqueCRs})`, L);
+  r = kv(ws, r, "Change type split", `${typeSplit()} – ${TYPE_MAPPING_STATEMENT}`, L, 30);
+  r = kv(ws, r, "Landscape", `Transport target ${POPULATION.target} · transport request prefix ${POPULATION.prefix}`, L);
   r = kv(ws, r, "Completeness & accuracy", d.source === "actt" ? ACTT_IPE_STATEMENT : MANUAL_IPE_STATEMENT, L, 40);
 
   r = section(ws, r + 1, "IPE checks", L);
-  headerRow(ws, r, ["Layer", "Check", "Value", "Result", "", "", ""]);
+  headerRow(ws, r, ["Layer", "Check", "Value", "Result", "", "", "", ""]);
   r++;
   (d.source === "actt" ? IPE_ACTT : IPE_MANUAL).forEach((c) => {
     cell(ws, r, 1, c.layer, { border: true });
@@ -192,55 +235,69 @@ function populationSheet(wb, d) {
   });
 
   r = section(ws, r + 1, "Row match proof (sample)", L);
-  headerRow(ws, r, ["TR number", "CR number", "E070 row", "STMS row", "Owner", "Import user", "Date"]);
+  headerRow(ws, r, ["Transport request", "Solman request", "Change type", "E070 row", "STMS row", "Developer (owner)", "Implementer (import user)", "Date"]);
   r++;
   POPULATION.matchProof.forEach((m) => {
-    [m.tr, m.cr, m.e070, m.stms, m.owner, m.user, m.date].forEach((v, i) => cell(ws, r, i + 1, v, { border: true }));
+    [m.tr, m.cr, m.type, m.e070, m.stms, m.owner, m.user, m.date].forEach((v, i) => cell(ws, r, i + 1, v, { border: true }));
     r++;
   });
 }
 
 // ── 4. Sample Testing ───────────────────────────────────────────────────────
 function testingSheet(wb, d) {
-  const heads = ["#", "TR number", "CR number", "Ticket", "Change type", "Owner", "Import user", "Unit test", "UAT", "Approved", "Imported", "A1", "A2", "A3", "A4", "Result", "Testing performed", "Evidence reference"];
+  const n = ATTRIBUTES.length;
+  const info = [
+    ["#", 5], ["Transport request", 13], ["Solman request", 12], ["SNOW change request", 13], ["Change type", 14], ["Short description", 30],
+    ["Requested by", 10], ["Requested date", 11], ["State", 12], ["Developer (TR owner)", 11], ["UAT tester / verifier", 11], ["Implementer (import user)", 12],
+    ["Unit test date", 11], ["UAT / verification date", 12], ["Approvals (date)", 28], ["Deployment date (import to PRD)", 12], ["Back-out plan", 11],
+  ];
+  const first = info.length + 1;
+  const heads = [...info.map((h) => h[0]), ...ATTRIBUTES.map((_, k) => `A${k + 1}`), "Result", "Testing performed", "Evidence reference"];
   const L = heads.length;
-  const ws = sheet(wb, "Sample Testing", [5, 13, 12, 12, 16, 10, 11, 11, 11, 11, 11, 6, 6, 6, 6, 12, 60, 46]);
-  banner(ws, "Sample testing", `${d.samples.length} samples · attributes A1–A4 per the RCM · round ${d.round}`, L);
+  const ws = sheet(wb, "Sample Testing", [...info.map((h) => h[1]), ...ATTRIBUTES.map(() => 6), 12, 70, 50]);
+  banner(ws, "Sample testing", `${d.samples.length} samples · attributes A1–A${n} per the RCM, tested against the criteria for each change type · round ${d.round}`, L);
   let r = 5;
   headerRow(ws, r, heads);
+  ws.getRow(r).height = 40;
   r++;
   d.samples.forEach((s, i) => {
-    const vals = [i + 1, s.tr, s.cr, s.ticket || "–", s.type, s.owner || "–", s.user || "–", s.unitDate || "–", s.uatDate || "–", s.apprDate || "–", s.importDate || "–"];
+    const miss = s.result === "Missing";
+    const dash = (v) => (miss ? "–" : v || "–");
+    const vals = [
+      i + 1, s.tr, s.cr, s.chg || "Not provided", typeLabel(s), dash(s.short), dash(s.requestedBy), dash(s.requestedOn), dash(s.state), dash(s.developer),
+      dash(s.uatBy || s.verifyBy || (s.testNA ? "N/A" : "")), dash(s.implementer), s.testNA ? "N/A" : dash(s.unitDate),
+      s.testNA ? "N/A" : dash(isEmergency(s) ? `${s.verifyDate} (post-deployment)` : s.uatDate), approvalText(s), dash(s.importDate), miss ? "–" : "Documented",
+    ];
     vals.forEach((v, k) => cell(ws, r, k + 1, v, { border: true, size: 9 }));
-    s.attrs.forEach((a, k) => cell(ws, r, 12 + k, a, { border: true, align: "center", bold: true, color: a === "X" ? "FFC00000" : BLACK }));
-    cell(ws, r, 16, resultText(s), { border: true, bold: true, align: "center", bg: resultFill(s) });
-    cell(ws, r, 17, testingPerformed(s) + (s.note && s.result === "Fail" ? ` Exception: ${s.note}.` : ""), { border: true, size: 9 });
-    cell(ws, r, 18, evidenceRefs(s).split(" | ").join("\n"), { border: true, size: 8.5 });
-    ws.getRow(r).height = 72;
+    s.attrs.forEach((a, k) => cell(ws, r, first + k, a, { border: true, align: "center", bold: true, color: markColor(a), bg: a === "N/A" ? NA_BG : undefined }));
+    cell(ws, r, first + n, resultText(s), { border: true, bold: true, align: "center", bg: resultFill(s) });
+    cell(ws, r, first + n + 1, testingPerformed(s) + (s.note && s.result === "Fail" ? ` Exception: ${s.note}.` : ""), { border: true, size: 9 });
+    cell(ws, r, first + n + 2, evidenceRefs(s).split(" | ").join("\n"), { border: true, size: 8.5 });
+    ws.getRow(r).height = miss ? 40 : 125;
     r++;
   });
-  ws.views = [{ showGridLines: false, state: "frozen", ySplit: 5, xSplit: 3 }];
+  ws.views = [{ showGridLines: false, state: "frozen", ySplit: 5, xSplit: 2 }];
 }
 
 // ── 5. Evidence with annotated screenshots ──────────────────────────────────
 function evidenceSheet(wb, d) {
   const L = 10;
   const ws = sheet(wb, "Evidence", Array(L).fill(12));
-  banner(ws, "Evidence & attribute mapping", "Annotated screenshots for every tested sample · green = attribute met, red = exception", L);
+  banner(ws, "Evidence & attribute mapping", "Annotated screenshots for every tested sample – SNOW change request, change tasks & approvals, STMS import history · green = attribute met, red = exception, blue = not applicable", L);
   let r = 5;
   d.samples.forEach((s, i) => {
     ws.mergeCells(r, 1, r, L);
-    cell(ws, r, 1, `Sample ${i + 1} – ${s.tr} / CR ${s.cr} – ${s.type} – ${resultText(s)}`, { bold: true, size: 11, color: WHITE, bg: s.result === "Pass" ? DGREEN : s.result === "Missing" ? "FFED8B00" : "FFDA291C", valign: "middle" });
-    ws.getRow(r).height = 22;
+    cell(ws, r, 1, `Sample ${i + 1} – Transport request ${s.tr} / Solman request ${s.cr} / SNOW ${s.chg || "not provided"} – ${typeLabel(s)} – ${resultText(s)}`, { bold: true, size: 11, color: WHITE, bg: s.result === "Pass" ? DGREEN : s.result === "Missing" ? "FFED8B00" : "FFDA291C", valign: "middle" });
+    ws.getRow(r).height = 34;
     r++;
     ws.mergeCells(r, 1, r, L);
     cell(ws, r, 1, testingPerformed(s), { border: true });
-    ws.getRow(r).height = 44;
+    ws.getRow(r).height = 84;
     r += 2;
     const imgs = evidenceImagesFor(s);
     if (!imgs.length) {
       ws.mergeCells(r, 1, r, L);
-      cell(ws, r, 1, "No screenshot – source document not provided.", { italic: true, color: "FF9A3412" });
+      cell(ws, r, 1, "No screenshot – SNOW change request record not provided.", { italic: true, color: "FF9A3412" });
       r += 3;
       return;
     }
@@ -249,10 +306,10 @@ function evidenceSheet(wb, d) {
       cell(ws, r, 1, `${img.title} – ${img.caption}`, { bold: true, size: 9.5 });
       r++;
       const id = wb.addImage({ base64: img.dataUrl, extension: "png" });
-      const w = 700;
-      const h = Math.round((img.height / img.width) * w);
-      ws.addImage(id, { tl: { col: 0, row: r - 1 }, ext: { width: w, height: h } });
-      r += Math.ceil(h / 20) + 1;
+      const w = Math.round(img.width * 0.62);
+      const h = Math.round(img.height * 0.62);
+      ws.addImage(id, { tl: { col: 0, row: r }, ext: { width: w, height: h } });
+      r += Math.ceil(h / 20) + 2;
     });
     r += 1;
   });
@@ -260,11 +317,11 @@ function evidenceSheet(wb, d) {
 
 // ── 6. Exceptions ───────────────────────────────────────────────────────────
 function exceptionsSheet(wb, d) {
-  const L = 6;
-  const ws = sheet(wb, "Exceptions", [14, 13, 14, 50, 40, 30]);
+  const L = 7;
+  const ws = sheet(wb, "Exceptions", [15, 13, 14, 18, 46, 40, 34]);
   banner(ws, "Exceptions", `${stats(d.samples).exceptions} exception(s) in ${d.samples.length} samples`, L);
   let r = 5;
-  headerRow(ws, r, ["TR number", "CR number", "Attribute", "Exception", "Impact", "Proposed action"]);
+  headerRow(ws, r, ["Transport request", "Solman request", "Change type", "Attribute", "Exception", "Impact", "Proposed action"]);
   r++;
   const ex = d.samples.filter((s) => s.result !== "Pass");
   if (!ex.length) {
@@ -277,11 +334,12 @@ function exceptionsSheet(wb, d) {
     [
       s.tr,
       s.cr,
-      sod ? "A4 – Segregation of duties" : "A1–A4 – Not tested",
+      typeLabel(s),
+      sod ? `A${ATTRIBUTES.length} – Segregation of duties` : `A1–A${ATTRIBUTES.length} – Not tested`,
       s.note,
-      sod ? "A developer could move untested or unauthorised code to production without independent oversight." : "Operating effectiveness cannot be concluded for this change without the source document.",
-      sod ? "Confirm with the control owner whether the change was reviewed after import; see IO-1." : "Obtain the ticket history and re-perform testing; see IO-2.",
-    ].forEach((v, k) => cell(ws, r, k + 1, v, { border: true, bg: k === 2 ? FAIL : undefined }));
+      sod ? "A developer could move untested or unauthorised code to production without independent oversight." : "Operating effectiveness cannot be concluded for this change without the SNOW change request record.",
+      sod ? "Confirm with the control owner whether the change was reviewed after import; see IO-1." : "Obtain the SNOW change request record and re-perform testing; see IO-2.",
+    ].forEach((v, k) => cell(ws, r, k + 1, v, { border: true, bg: k === 3 ? FAIL : undefined }));
     ws.getRow(r).height = 46;
     r++;
   });

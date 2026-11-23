@@ -6,8 +6,8 @@ import StepBadge from "../../components/StepBadge";
 import DataTablesBlock from "../../components/DataTablesBlock";
 import { ChoiceCards, KpiStrip, OwnerPanel, ReviewerPanel, SOURCE_OPTIONS, StatusBanner, SummaryBullets, ViewToggle, phaseLabel } from "./components";
 import {
-  ACTT_IPE_STATEMENT, ACTT_SYSTEM, ATTRIBUTES, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM,
-  attributeSummary, getSamples, sampleSummary, stats, testingPerformed,
+  ACTT_IPE_STATEMENT, ACTT_SYSTEM, ATTRIBUTES, CHANGE_TYPES, CRITERIA, IMPROVEMENTS, IPE_ACTT, IPE_MANUAL, MANUAL_IPE_STATEMENT, POPULATION, RCM, SAMPLING,
+  TYPE_MAPPING_STATEMENT, approvalText, attributeSummary, countByType, getSamples, isEmergency, sampleSummary, stats, testProcedures, testingPerformed, typeLabel, typeSplit,
 } from "./data/demo";
 import { evidenceImagesFor } from "./evidenceImages";
 
@@ -21,10 +21,10 @@ const today = () => new Date().toLocaleDateString("en-GB").replace(/\//g, ".");
 const PLACEHOLDERS = {
   rcm: "Attach your RCM (Risk & Control Matrix)…",
   source: "Choose where I should get the population from, or attach it…",
-  "manual-file": "Attach the population file (E070 / STMS extracts) and screenshots…",
+  "manual-file": "Attach the population file (E070 / STMS and SNOW change request extracts) and screenshots…",
   running: "Working on it…",
   samples: "Attach the selected samples file, or choose random selection…",
-  evidence: "Attach the ticket history PDFs and approval emails (.msg)…",
+  evidence: "Attach the SNOW change request records (PDF), test evidence and approval emails (.msg)…",
   done: "Ask about an exception or a sample, e.g. “CIDK905003”…",
 };
 
@@ -45,6 +45,7 @@ const rcmTable = () => ({
     { f: "Key?", d: RCM.key },
     { f: "Owner", d: RCM.owner },
     { f: "Systems", d: RCM.systems },
+    { f: "Testing method", d: RCM.testingMethod },
     { f: "Test approach", d: RCM.testApproach },
     {
       f: "Test attributes",
@@ -61,6 +62,27 @@ const rcmTable = () => ({
   ],
 });
 
+// What is checked for each attribute, by change type
+const criteriaTable = () => ({
+  title: "Testing criteria by change type",
+  note: "Each sample is tested only against the criteria for its own change type.",
+  columns: [
+    { key: "a", label: "Attribute", minWidth: 170 },
+    ...CHANGE_TYPES.map((t) => ({ key: t, label: t, minWidth: 220 })),
+  ],
+  rows: CRITERIA.map((c, k) => ({ a: `A${k + 1} – ${ATTRIBUTES[k].short}`, ...c })),
+});
+
+const typeTable = () => ({
+  title: "Population by change type",
+  note: TYPE_MAPPING_STATEMENT,
+  columns: [
+    { key: "type", label: "Change type" },
+    { key: "count", label: "Transport requests", align: "center" },
+  ],
+  rows: [...CHANGE_TYPES.map((t) => ({ type: t, count: POPULATION.byType[t] })), { type: "Total", count: POPULATION.transports }],
+});
+
 const ipeTable = (rows) => ({
   title: "IPE validation",
   columns: [
@@ -74,14 +96,15 @@ const ipeTable = (rows) => ({
 
 const matchTable = () => ({
   title: "Row match proof (sample)",
-  note: "E070 column A ↔ STMS column D, exact TR number match. CR numbers taken from E070 column J (10 digits starting with 6 or 7).",
+  note: "E070 column A ↔ STMS column D, exact transport request match. Solman request numbers taken from E070 column J (10 digits starting with 6 or 7); change type from the SNOW change request extract.",
   columns: [
-    { key: "tr", label: "TR number", mono: true },
-    { key: "cr", label: "CR number", mono: true },
+    { key: "tr", label: "Transport request", mono: true },
+    { key: "cr", label: "Solman request", mono: true },
+    { key: "type", label: "Change type" },
     { key: "e070", label: "E070 row" },
     { key: "stms", label: "STMS row" },
-    { key: "owner", label: "Owner" },
-    { key: "user", label: "Import user" },
+    { key: "owner", label: "Developer (owner)" },
+    { key: "user", label: "Implementer (import user)" },
     { key: "date", label: "Date" },
   ],
   rows: POPULATION.matchProof,
@@ -91,8 +114,9 @@ const sampleTable = (samples, withResult) => ({
   title: withResult ? "Per-sample results" : "Selected samples",
   columns: [
     { key: "n", label: "#" },
-    { key: "tr", label: "TR number", mono: true },
-    { key: "cr", label: "CR number", mono: true },
+    { key: "tr", label: "Transport request", mono: true },
+    { key: "cr", label: "Solman request", mono: true },
+    { key: "chg", label: "SNOW change request", mono: true },
     { key: "type", label: "Change type" },
     ...(withResult
       ? [
@@ -106,7 +130,8 @@ const sampleTable = (samples, withResult) => ({
     n: i + 1,
     tr: s.tr,
     cr: s.cr,
-    type: withResult ? s.type : s.result === "Missing" ? "To be confirmed from ticket" : s.type,
+    chg: s.chg || "Not provided",
+    type: s.type,
     ...Object.fromEntries(s.attrs.map((a, k) => [`a${k}`, a])),
     result: s.result === "Pass" ? "Pass" : s.result === "Missing" ? "Not tested" : "Fail",
     note: s.note || "—",
@@ -121,6 +146,8 @@ const attributeTable = (samples) => ({
     { key: "tested", label: "Tested", align: "center" },
     { key: "ok", label: "√", align: "center" },
     { key: "x", label: "X", align: "center" },
+    { key: "na", label: "N/A", align: "center" },
+    { key: "nt", label: "NT", align: "center" },
     { key: "conclusion", label: "Conclusion", type: "badge" },
     { key: "comment", label: "Comment", minWidth: 220 },
   ],
@@ -130,11 +157,22 @@ const attributeTable = (samples) => ({
 const exceptionTable = (samples) => ({
   title: "Exceptions",
   columns: [
-    { key: "tr", label: "TR number", mono: true },
-    { key: "cr", label: "CR number", mono: true },
+    { key: "tr", label: "Transport request", mono: true },
+    { key: "cr", label: "Solman request", mono: true },
+    { key: "type", label: "Change type" },
     { key: "note", label: "Exception", minWidth: 360 },
   ],
   rows: samples.filter((s) => s.result !== "Pass"),
+});
+
+// Summary of the test procedures performed – same content as the work paper Summary tab
+const proceduresTable = (d) => ({
+  title: "Test procedures performed",
+  columns: [
+    { key: "step", label: "Area", minWidth: 150 },
+    { key: "detail", label: "Procedure performed / result", minWidth: 520 },
+  ],
+  rows: testProcedures(d),
 });
 
 const improvementTable = () => ({
@@ -157,18 +195,24 @@ const RCM_STEPS = [
     id: "r1",
     label: "Read the RCM",
     detail: RCM.controlId,
-    subChecks: [ok("Control objective, risk and description identified"), ok(`Nature, frequency and owner captured – ${RCM.frequency}`), ok(`${ATTRIBUTES.length} test attributes extracted`), ok("Evidence required mapped to each attribute")],
+    subChecks: [
+      ok("Control objective, risk and description identified"),
+      ok(`Nature, frequency and owner captured – ${RCM.frequency}`),
+      ok(`${ATTRIBUTES.length} test attributes extracted`),
+      ok(`Change types per the change policy: ${CHANGE_TYPES.join(", ")} – testing and approval criteria mapped for each type`),
+      ok("Evidence required mapped to each attribute"),
+    ],
   },
 ];
 
 const ACTT_STEPS = [
   { id: "a1", label: "Connect to ACTT", detail: `Read-only connection to ${ACTT_SYSTEM.sid} · client ${ACTT_SYSTEM.client}`, subChecks: [ok("Authenticated to ACTT", "[ACTT] Session opened (read-only)"), ok(`Located ${ACTT_SYSTEM.description} ${ACTT_SYSTEM.sid} · client ${ACTT_SYSTEM.client}`)] },
-  { id: "a2", label: "Extract transport population", detail: `In-scope period ${RCM.period}`, subChecks: [ok("E070 transport headers extracted – 87 rows"), ok("STMS_IMPORT import history extracted – 87 rows"), ok("Merged on TR number – 87 / 87 matched"), ok("CR numbers extracted – 70 unique CRs")] },
+  { id: "a2", label: "Extract transport population", detail: `In-scope period ${RCM.period}`, subChecks: [ok("E070 transport headers extracted – 87 rows"), ok("STMS_IMPORT import history extracted – 87 rows"), ok("Merged on transport request – 87 / 87 matched"), ok("Solman request numbers extracted – 70 unique"), ok(`Change type mapped from SNOW – ${typeSplit()}`)] },
   { id: "a3", label: "IPE – reliance on ACTT", detail: "System-generated population", subChecks: IPE_ACTT.map((c) => ok(`${c.check} – ${c.value}`)) },
 ];
 
 const MANUAL_STEPS = [
-  { id: "m1", label: "Read population file", detail: "E070 Extract and STMS_IMPORT Extract sheets", subChecks: [ok("E070 sheet: 87 rows parsed"), ok("STMS sheet: 87 rows parsed"), ok("Merged on TR number – 87 / 87 matched"), ok("CR numbers extracted – 70 unique CRs")] },
+  { id: "m1", label: "Read population file", detail: "E070, STMS_IMPORT and SNOW change request extracts", subChecks: [ok("E070 sheet: 87 rows parsed"), ok("STMS sheet: 87 rows parsed"), ok("Merged on transport request – 87 / 87 matched"), ok("Solman request numbers extracted – 70 unique"), ok(`Change type mapped from the SNOW extract – ${typeSplit()}`)] },
   ...["Completeness", "Accuracy", "Screenshot"].map((layer, i) => ({
     id: `m${i + 2}`,
     label: `IPE – ${layer === "Screenshot" ? "screenshot verification" : layer.toLowerCase()}`,
@@ -183,27 +227,34 @@ const testingSteps = (samples, fileCount, round) => [
     label: "Match evidence to samples",
     detail: `${fileCount} file(s) received${round > 1 ? ` · round ${round}` : ""}`,
     subChecks: [
-      ok("Ticket history PDFs indexed by CR number"),
-      ok(`GPO / LPO approval emails matched to ${samples.filter((s) => s.type === "Standard change").length} standard changes`),
+      ok("SNOW change request records indexed by SNOW change request and Solman request number"),
+      ok(`Approval evidence matched by change type – ${countByType(samples)}`),
       samples.some((s) => s.result === "Missing")
-        ? { text: "No ticket history PDF found for CIDK905611 (CR 6000028397)", status: "exception" }
-        : ok("Ticket history found for every sample, including CIDK905611 (supplied by the control owner)"),
+        ? { text: "No SNOW change request record found for CIDK905611 (Solman request 6000028397)", status: "exception" }
+        : ok("SNOW change request record found for every sample, including CIDK905611 (supplied by the control owner)"),
     ],
   },
   ...samples.map((s, i) => {
     const miss = s.result === "Missing";
     return {
       id: `t${i + 1}`,
-      label: `Sample ${i + 1} – ${s.tr} → CR ${s.cr}`,
-      detail: miss ? "Not tested" : s.type,
+      label: `Sample ${i + 1} – ${s.tr} → Solman ${s.cr}${s.chg ? ` → ${s.chg}` : ""}`,
+      detail: miss ? "Not tested" : typeLabel(s),
       subChecks: miss
-        ? [{ text: "Attributes 1–4 not tested – source document missing", status: "exception" }]
+        ? [{ text: `Attributes 1–${ATTRIBUTES.length} not tested – SNOW change request record missing`, status: "exception" }]
         : [
-            ok(`A1–A2 – unit test ${s.unitDate}, UAT ${s.uatDate}, evidence retained in Solman`),
-            ok(`A3 – ${s.type === "Preapproved change" ? "on pre-approved list" : `approved ${s.apprDate}`}, before import ${s.importDate}`),
-            s.attrs[3] === "X"
-              ? { text: `A4 – SOD violation: owner ${s.owner} also imported the transport`, status: "exception" }
-              : ok(`A4 – owner ${s.owner} ≠ import user ${s.user}`),
+            ok(`A1 – raised by ${s.requestedBy} on ${s.requestedOn}, assigned to ${s.developer}, state ${s.state}; business justification recorded`),
+            s.testNA
+              ? ok(`A2–A3 – N/A: testing not required per standard catalogue ${s.catalogue} (reason recorded)`)
+              : ok(
+                  isEmergency(s)
+                    ? `A2–A3 – unit test ${s.unitDate} before import, business verification ${s.verifyDate}; evidence attached`
+                    : `A2–A3 – unit test ${s.unitDate}, UAT ${s.uatDate}, before import ${s.importDate}; evidence attached`
+                ),
+            ok(`A4 – ${approvalText(s)}; back-out plan documented`),
+            s.attrs[4] === "X"
+              ? { text: `A5 – SoD conflict: developer ${s.developer} also imported the transport`, status: "exception" }
+              : ok(`A5 – developer ${s.developer} ≠ implementer ${s.implementer}`),
           ],
     };
   }),
@@ -286,11 +337,11 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
         type: "jsx",
         content: (
           <>
-            Thanks – I've read your RCM. I test the <strong>{RCM.name}</strong> control ({RCM.controlId}) the way an auditor would – checking that each change is tested
-            before implementation, testing is documented and retained, changes are approved before migration and developers don't import their own transports – and
-            rolling each finding up to a pass / exception verdict.
+            Thanks – I've read your RCM. I test the <strong>{RCM.name}</strong> control ({RCM.controlId}) the way an auditor would – checking that each change is
+            raised and justified, tested before deployment with evidence retained, authorised in line with its change type (Normal, Standard or Emergency), and that
+            developers don't import their own transports – and rolling each finding up to a pass / exception verdict.
             <div style={{ marginTop: 14 }}>
-              <DataTablesBlock tables={[rcmTable()]} />
+              <DataTablesBlock tables={[rcmTable(), criteriaTable()]} />
             </div>
           </>
         ),
@@ -305,8 +356,8 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     <>
       <StepBadge index={2} total={TOTAL} label="Population" />
       <div>
-        Let's get started – please provide the population of transports imported into production in {RCM.period}. Pull it from ACTT, or upload the E070 / STMS
-        extracts with screenshots, and I'll test completeness and accuracy end to end.
+        Let's get started – please provide the population of transport requests imported into production in {RCM.period}. Pull it from ACTT, or upload the E070 /
+        STMS extracts with screenshots and the SNOW change request extract, and I'll test completeness and accuracy end to end and map each change to its change type.
       </div>
       <ChoiceCards options={SOURCE_OPTIONS} chosen={chosen} onChoose={(id) => handlers.current.chooseSource(id)} />
     </>
@@ -323,7 +374,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     }
     userText("I'll upload the population manually");
     setStage("manual-file");
-    await sayText("Please upload the population file with the E070 and STMS_IMPORT extracts, plus the E070 and STMS screenshots. I'll run the full IPE validation on it.");
+    await sayText("Please upload the population file with the E070 and STMS_IMPORT extracts and the SNOW change request extract (for change types), plus the E070 and STMS screenshots. I'll run the full IPE validation on it.");
   };
 
   const runPopulation = async (steps, intro) => {
@@ -352,11 +403,11 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
                 { label: "Transport requests", value: POPULATION.transports },
                 { label: "STMS matched", value: POPULATION.stmsMatched },
                 { label: "Unique owners", value: POPULATION.owners },
-                { label: "Unique CRs", value: POPULATION.uniqueCRs },
-                { label: "SOD flags (owner = user)", value: POPULATION.sodFlags },
+                { label: "Unique Solman requests", value: POPULATION.uniqueCRs },
+                ...CHANGE_TYPES.map((t) => ({ label: `${t} changes`, value: POPULATION.byType[t] })),
               ]}
             />
-            <DataTablesBlock tables={[ipeTable(actt ? IPE_ACTT : IPE_MANUAL), matchTable()]} />
+            <DataTablesBlock tables={[ipeTable(actt ? IPE_ACTT : IPE_MANUAL), typeTable(), matchTable()]} />
           </>
         ),
       },
@@ -374,14 +425,14 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
         <>
           <StepBadge index={3} total={TOTAL} label={ctx.current.round > 1 ? `Samples – round ${ctx.current.round}` : "Samples"} />
           <div>
-            Population processed: {POPULATION.transports} transports. Upload your <strong>Selected Samples</strong> file, or I can randomly select {samples().length} samples per
-            the RCM test approach.
+            Population processed: {POPULATION.transports} transport requests ({typeSplit()}). Upload your <strong>Selected Samples</strong> file, or I can select{" "}
+            {SAMPLING.size} samples per the client sampling methodology – random, stratified by change type with at least {SAMPLING.minPerType} from each type.
           </div>
         </>
       ),
       actions: [
         { id: "upload-samples", label: "Upload selected samples", primary: true, icon: Upload },
-        { id: "random", label: `Randomly select ${samples().length} samples`, icon: Shuffle },
+        { id: "random", label: `Select ${SAMPLING.size} samples (stratified random)`, icon: Shuffle },
       ],
     });
   };
@@ -396,11 +447,12 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
       type: "jsx",
       content: (
         <>
-          <DataTablesBlock intro={<>Samples locked – {samples().length} transports matched to the population:</>} tables={[sampleTable(samples(), false)]} />
+          <DataTablesBlock intro={<>Samples locked – {samples().length} transport requests matched to the population ({countByType(samples())}):</>} tables={[sampleTable(samples(), false)]} />
           <StepBadge index={4} total={TOTAL} label="Evidence" />
           <div>
-            Please upload the <strong>ticket history PDFs</strong> for these samples and, for standard changes, the <strong>GPO / LPO approval emails</strong> (.msg). You can
-            attach a whole folder.
+            Please upload the <strong>SNOW change request records</strong> (PDF, including change tasks and back-out plan) and the <strong>test evidence</strong> for these
+            samples, plus the approval evidence for each change type – <strong>Normal:</strong> business owner and CAB approval emails (.msg); <strong>Standard:</strong> the
+            standard change catalogue and change coordinator approval; <strong>Emergency:</strong> ECAB approval and the retrospective CAB minutes. You can attach a whole folder.
           </div>
         </>
       ),
@@ -417,7 +469,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
         type: "checks",
         intro: <div>{round > 1 ? `Re-performing testing – round ${round}.` : "Thanks – testing each sample against the control attributes."}</div>,
         checks: testingSteps(samples(), fileCount, round),
-        runningLabel: "Inspecting tickets, approvals and segregation of duties…",
+        runningLabel: "Inspecting SNOW change requests, change tasks, approvals and segregation of duties…",
         doneLabel: `Testing complete – ${stats(samples()).exceptions} exception(s) noted.`,
         onComplete: () => handlers.current.finish(),
       },
@@ -451,7 +503,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
                 { label: "Population", value: POPULATION.transports },
               ]}
             />
-            <DataTablesBlock tables={[sampleTable(list, true), attributeTable(list), exceptionTable(list), improvementTable()]} />
+            <DataTablesBlock tables={[proceduresTable(wpData()), sampleTable(list, true), attributeTable(list), exceptionTable(list), improvementTable()]} />
           </>
         ),
         actions: [
@@ -575,7 +627,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
         <>
           <StepBadge index={4} total={TOTAL} label={`Evidence – round ${round}`} />
           <div>
-            Please upload the updated evidence for the samples (ticket history PDFs and approval emails)
+            Please upload the updated evidence for the samples (SNOW change request records, test evidence and approval evidence)
             {docs.length ? ", or I can re-test straight away with the documents the control owner provided" : ""}.
           </div>
         </>
@@ -638,14 +690,15 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
   // ── Q&A after testing ───────────────────────────────────────────────────
   const qa = async (text) => {
     const l = text.toLowerCase();
-    const s = samples().find((x) => l.includes(x.tr.toLowerCase()) || l.includes(x.cr));
+    const s = samples().find((x) => l.includes(x.tr.toLowerCase()) || l.includes(x.cr) || (x.chg && l.includes(x.chg.toLowerCase())));
     if (s) {
       return sayText(
         <>
           <strong>
-            {s.tr} → CR {s.cr}
+            {s.tr} → Solman {s.cr}
+            {s.chg ? ` → ${s.chg}` : ""}
           </strong>{" "}
-          ({s.type}): <strong style={{ color: s.result === "Pass" ? "#26890D" : "#DA291C" }}>{s.result === "Pass" ? "Pass" : s.result === "Missing" ? "Not tested" : "Fail"}</strong>
+          ({typeLabel(s)}): <strong style={{ color: s.result === "Pass" ? "#26890D" : "#DA291C" }}>{s.result === "Pass" ? "Pass" : s.result === "Missing" ? "Not tested" : "Fail"}</strong>
           <div style={{ fontSize: 13, color: "#53565A", marginTop: 4 }}>{testingPerformed(s)}</div>
         </>
       );
@@ -659,8 +712,9 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     if (/improve|recommend/.test(l)) return say({ type: "tables", tables: [improvementTable()] });
     if (/attribute/.test(l)) return say({ type: "tables", tables: [attributeTable(samples())] });
     if (/ipe|population|complete|accura/.test(l)) return say({ type: "tables", tables: [ipeTable(ctx.current.source === "actt" ? IPE_ACTT : IPE_MANUAL)] });
+    if (/criteria|change type|normal|standard|emergency/.test(l)) return say({ type: "tables", tables: [criteriaTable(), typeTable()] });
     if (/exception|fail|sod|issue|why|summary/.test(l)) return say({ type: "jsx", content: <SummaryBullets items={samples().map(sampleSummary)} /> });
-    return sayText("I can explain the exceptions, show a sample (type its TR or CR number), the attribute summary, improvement opportunities or annotated evidence, send the results to the reviewer, or download the work paper.");
+    return sayText("I can explain the exceptions, show a sample (type its transport request, Solman request or SNOW change request number), the attribute summary, the criteria by change type, improvement opportunities or annotated evidence, send the results to the reviewer, or download the work paper.");
   };
 
   // ── buttons ─────────────────────────────────────────────────────────────
@@ -668,8 +722,8 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     if (action === "upload-samples") return fileInputRef.current?.click();
     if (action === "random") {
       if (stageRef.current !== "samples") return;
-      userText(`Randomly select ${samples().length} samples`);
-      return takeSamples(`Random selection by the tool – ${samples().length} samples from a population of ${POPULATION.transports} transports.`);
+      userText(`Select ${SAMPLING.size} samples – stratified random`);
+      return takeSamples(`Selected by the tool – ${samples().length} samples from a population of ${POPULATION.transports} transport requests, stratified by change type (${countByType(samples())}).`);
     }
     if (action === "download") return downloadWP(wpData());
     if (action === "evidence") return showEvidence();
@@ -738,7 +792,7 @@ export default function ChangeChatbot({ onTitle, onNewChat }) {
     }
     if (st === "evidence") {
       if (files.length) return runTesting(files.length);
-      return sayText("Please attach the ticket history PDFs and approval emails for the selected samples.");
+      return sayText("Please attach the SNOW change request records, test evidence and approval evidence for the selected samples.");
     }
     if (st === "review-pending") return sayText("The results are with the reviewer – switch to the Reviewer view to approve or reject.");
     if (st === "owner-pending") return sayText("Waiting for the control owner to respond to the reviewer's observation – switch to the Control owner view.");
